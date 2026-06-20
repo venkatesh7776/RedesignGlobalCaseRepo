@@ -1,0 +1,180 @@
+import { useState } from "react";
+import { DashboardSidebar } from "./components/DashboardSidebar";
+import { DashboardTopbar } from "./components/DashboardTopbar";
+import { GlobalCaseRepoPage } from "./pages/GlobalCaseRepoPage";
+import { ClientsPage } from "./pages/ClientsPage";
+import { CommunicationPage } from "./pages/CommunicationPage";
+import { DemandLibraryPage } from "./pages/DemandLibraryPage";
+import { TemplatesPage } from "./pages/TemplatesPage";
+import { CaseIntakePage } from "./pages/CaseIntakePage";
+import { IntakeWorkflowPage } from "./pages/IntakeWorkflowPage";
+import { ClassificationPage } from "./pages/ClassificationPage";
+import { AnalysisPage } from "./pages/AnalysisPage";
+import { ValuationPage } from "./pages/ValuationPage";
+import { CaseReadyPage } from "./pages/CaseReadyPage";
+import {
+  PipelineState, CaseDocument, AttorneyNote,
+  classifyDocuments, generateAnalysisFindings
+} from "./types/case";
+
+const INITIAL_PIPELINE: PipelineState = {
+  retainerStatus: "not-sent",
+  intakeCreated: false,
+  intakeSent: false,
+  intakeLink: "https://leco.ai/intake/ABX29...",
+  documents: [],
+  analysisDone: false,
+  valuationDone: false,
+  notes: [],
+};
+
+const EXISTING_CASE_DOCUMENTS: CaseDocument[] = [
+  { id: "ec-1", name: "MRI_Report_2026.pdf", source: "Plaintiff", date: "Jun 1, 2026", status: "Processed" },
+  { id: "ec-2", name: "ER_Bills.pdf", source: "Plaintiff", date: "Jun 1, 2026", status: "Processed" },
+  { id: "ec-3", name: "hospital_medical_records.pdf", source: "Plaintiff", date: "Jun 1, 2026", status: "Processed" },
+  { id: "ec-4", name: "police_report_final.pdf", source: "Plaintiff", date: "Jun 2, 2026", status: "Processed" },
+  { id: "ec-5", name: "physical_therapy_notes.pdf", source: "Plaintiff", date: "Jun 3, 2026", status: "Processed" },
+  { id: "ec-6", name: "insurance_policy_v2.pdf", source: "Attorney", date: "Jun 2, 2026", status: "Processed" },
+  { id: "ec-7", name: "witness_statement.pdf", source: "Attorney", date: "Jun 3, 2026", status: "Processed" },
+  { id: "ec-8", name: "wage_loss_statement.pdf", source: "Plaintiff", date: "Jun 4, 2026", status: "Processed" },
+];
+
+function buildPipelineForCase(caseData: any): PipelineState {
+  const stage: string = caseData?.stage ?? "";
+  const isNew = !stage || stage === "New" || stage === "Client Intake";
+
+  if (isNew) return INITIAL_PIPELINE;
+
+  // Any case that has progressed past the initial stage already has retainer + intake sent
+  const hasDocs = ["Classification", "Analysis", "Valuation", "Ready For Review"].includes(stage);
+  const analysisDone = ["Valuation", "Ready For Review"].includes(stage);
+  const valuationDone = stage === "Ready For Review";
+
+  return {
+    retainerStatus: "signed",
+    intakeCreated: true,
+    intakeSent: true,
+    intakeLink: "https://leco.ai/intake/ABX29...",
+    documents: hasDocs ? EXISTING_CASE_DOCUMENTS : [],
+    analysisDone,
+    valuationDone,
+    notes: [],
+  };
+}
+
+export default function App() {
+  const [activePage, setActivePage] = useState("intake");
+  const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [pipeline, setPipeline] = useState<PipelineState>(INITIAL_PIPELINE);
+
+  const updatePipeline = (updates: Partial<PipelineState>) => {
+    setPipeline((prev) => ({ ...prev, ...updates }));
+  };
+
+  // Derived state used across stages
+  const categories = classifyDocuments(pipeline.documents);
+  const analysisFindings = generateAnalysisFindings(categories);
+
+  const handleOpenWorkflow = (caseData: any) => {
+    setSelectedCase(caseData);
+    setPipeline(buildPipelineForCase(caseData));
+    setActivePage("workflow");
+  };
+
+  const handleStageNavigation = (stageName: string) => {
+    const map: Record<string, string> = {
+      "Client Intake": "workflow",
+      Analysis: "analysis",
+      Valuation: "valuation",
+      "Case Ready": "case-ready",
+    };
+    if (map[stageName]) setActivePage(map[stageName]);
+  };
+
+  const renderPage = () => {
+    switch (activePage) {
+      case "workflow":
+        return (
+          <IntakeWorkflowPage
+            caseData={selectedCase}
+            pipeline={pipeline}
+            onPipelineUpdate={updatePipeline}
+            onContinue={() => setActivePage("analysis")}
+            onStageClick={handleStageNavigation}
+            onBackToIntake={() => setActivePage("intake")}
+          />
+        );
+      case "classification":
+        return (
+          <ClassificationPage
+            caseData={selectedCase}
+            documents={pipeline.documents}
+            onStageClick={handleStageNavigation}
+            onBackToIntake={() => setActivePage("intake")}
+            onProceedToAnalysis={() => setActivePage("analysis")}
+          />
+        );
+      case "analysis":
+        return (
+          <AnalysisPage
+            caseData={selectedCase}
+            documents={pipeline.documents}
+            onStageClick={handleStageNavigation}
+            onBackToIntake={() => setActivePage("intake")}
+            onProceedToValuation={() => {
+              updatePipeline({ analysisDone: true });
+              setActivePage("valuation");
+            }}
+          />
+        );
+      case "valuation":
+        return (
+          <ValuationPage
+            caseData={selectedCase}
+            analysisFindings={analysisFindings}
+            onStageClick={handleStageNavigation}
+            onBackToIntake={() => setActivePage("intake")}
+            onReturnToAnalysis={() => setActivePage("analysis")}
+            onProceedToCaseReady={() => {
+              updatePipeline({ valuationDone: true });
+              setActivePage("case-ready");
+            }}
+          />
+        );
+      case "case-ready":
+        return (
+          <CaseReadyPage
+            caseData={selectedCase}
+            pipeline={pipeline}
+            onPipelineUpdate={updatePipeline}
+            onStageClick={handleStageNavigation}
+            onBackToIntake={() => setActivePage("intake")}
+          />
+        );
+      case "intake":
+        return <CaseIntakePage onOpenWorkflow={handleOpenWorkflow} />;
+      case "cases":
+        return <GlobalCaseRepoPage />;
+      case "clients":
+        return <ClientsPage />;
+      case "communication":
+        return <CommunicationPage />;
+      case "demands":
+        return <DemandLibraryPage />;
+      case "templates":
+        return <TemplatesPage />;
+      default:
+        return <CaseIntakePage onOpenWorkflow={handleOpenWorkflow} />;
+    }
+  };
+
+  return (
+    <div className="h-screen bg-gray-50 flex overflow-hidden">
+      <DashboardSidebar activePage={activePage} onNavigate={setActivePage} />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <DashboardTopbar />
+        <main className="flex-1 overflow-auto">{renderPage()}</main>
+      </div>
+    </div>
+  );
+}

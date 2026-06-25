@@ -1,5 +1,6 @@
 import { LayoutDashboard, FolderOpen, FileText, Mail, Users, Files, Settings, LogOut, Inbox, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { Button } from "./ui/button";
+import brockovichLogo from "../../../brockovich.ai.png";
 
 interface DashboardSidebarProps {
   activePage: string;
@@ -13,17 +14,17 @@ export function DashboardSidebar({ activePage, onNavigate, collapsed = false, on
     <div className={`${collapsed ? "w-[72px]" : "w-64"} h-full bg-white border-r border-line flex flex-col transition-[width] duration-200 ease-in-out`}>
       <div className={`${collapsed ? "px-3" : "px-6"} py-6 flex-shrink-0`}>
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-          <div className="flex items-center gap-2.5">
+          {collapsed ? (
             <div className="w-9 h-9 bg-ink rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-semibold text-sm tracking-tight">LG</span>
+              <span className="text-white font-semibold text-sm tracking-tight">B</span>
             </div>
-            {!collapsed && (
-              <div>
-                <div className="text-ink font-semibold text-sm leading-tight">LexGuard</div>
-                <div className="eyebrow mt-0.5">Injury Intel</div>
-              </div>
-            )}
-          </div>
+          ) : (
+            <img
+              src={brockovichLogo}
+              alt="brockovich.ai"
+              className="h-7 w-auto max-w-[160px] object-contain object-left"
+            />
+          )}
           {!collapsed && onToggleCollapse && (
             <button
               onClick={onToggleCollapse}

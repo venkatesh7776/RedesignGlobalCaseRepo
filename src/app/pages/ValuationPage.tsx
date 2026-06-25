@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StageNavigator } from "../components/StageNavigator";
-import { ChevronLeft, CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, Sparkles, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { AnalysisFinding } from "../types/case";
 
@@ -29,6 +29,17 @@ const economicDamages = [
 // Factors that justify the recommended valuation strategy (shown as compact chips).
 const keyFactors = ["Clear Liability", "Severe Injuries", "Strong Evidence", "Favorable Jurisdiction"];
 
+// Non-economic damage categories the recommended multiplier is applied to.
+const appliedCategories = [
+  "Pain & Suffering",
+  "Emotional Distress",
+  "Quality of Life",
+  "Cognitive Impairment",
+  "Physical Impairment",
+  "Dignity & Independence",
+  "Family Relationship Impact",
+];
+
 const baseEconomic = 161450;
 const baseMultiplier = 9;
 const baseMult = baseEconomic * baseMultiplier;
@@ -51,8 +62,9 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
 
   const data = { ...defaultCaseData, ...caseData };
 
-  const multiplierAdjustment = baseEconomic * multiplier;
-  const totalRecommended = baseEconomic + multiplierAdjustment;
+  // The "Recommended" valuation summary is pinned to LECO's recommended multiplier
+  // (baseMultiplier). The interactive slider below is an exploration tool only and
+  // does not alter the recommended figures.
 
   // Key valuation factors that justify the currently selected multiplier zone
   const valuationFactors =
@@ -156,46 +168,55 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 <div className="bg-tint px-5 py-3 border-b border-line">
                   <h3 className="card-title">Non-Economic Damages</h3>
                 </div>
-                <div className="p-5">
-                {/* Recommended multiplier + estimated non-economic damages */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                  <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
-                    <div className="eyebrow mb-1">Recommended Multiplier</div>
-                    <div className="text-2xl font-bold text-deep tabular-nums">{multiplier}×</div>
+                <div className="p-5 space-y-6">
+                  {/* Top metrics — sky-blue brand cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
+                      <div className="eyebrow mb-1">Recommended Multiplier</div>
+                      <div className="text-2xl font-bold text-deep tabular-nums">{baseMultiplier}×</div>
+                    </div>
+                    <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
+                      <div className="eyebrow mb-1">Estimated Non-Economic Damages</div>
+                      <div className="text-2xl font-bold text-ink tabular-nums">{formatCurrency(baseMult)}</div>
+                    </div>
                   </div>
-                  <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
-                    <div className="eyebrow mb-1">Est. Non-Economic Damages</div>
-                    <div className="text-2xl font-bold text-ink tabular-nums">{formatCurrency(multiplierAdjustment)}</div>
-                  </div>
-                </div>
 
-                {/* Recommended strategy — concise */}
-                <div className="bg-[#F6FDFF] border border-[#D6F2F7] rounded-xl p-4 mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                    <span className="eyebrow text-deep">Recommended Valuation Strategy</span>
+                  {/* Recommended Valuation Strategy — full-width explanation */}
+                  <div className="bg-[#F6FDFF] border border-[#D6F2F7] rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      <span className="eyebrow text-deep">Recommended Valuation Strategy</span>
+                    </div>
+                    <p className="body-text">
+                      LECO recommends applying a <strong className="font-semibold text-ink">{baseMultiplier}× multiplier</strong> to estimate{" "}
+                      <strong className="font-semibold text-ink">Non-Economic Damages</strong> based on the verified case evidence and overall case strength.
+                    </p>
                   </div>
-                  <p className="body-text mb-3">
-                    LECO recommends a {multiplier}× multiplier given clear liability, severe injuries, and strong supporting evidence.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {keyFactors.map((f) => (
-                      <span key={f} className="pill pill-neutral">
-                        <CheckCircle className="w-4 h-4" strokeWidth={1.75} />
-                        {f}
-                      </span>
-                    ))}
-                  </div>
-                </div>
 
-                {/* Adjust multiplier — scrolls to the interactive strategy section */}
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("multiplier-strategy")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-[10px] bg-white border-[1.5px] border-brand text-deep text-sm font-semibold shadow-[0_2px_6px_rgba(0,0,0,0.06)] hover:bg-tint transition-colors"
-                >
-                  <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} /> Adjust Multiplier
-                </button>
+                  {/* Applied Categories — what the multiplier covers */}
+                  <div>
+                    <div className="eyebrow mb-3">Applied Categories</div>
+                    <div className="flex flex-wrap gap-2">
+                      {appliedCategories.map((c) => (
+                        <span key={c} className="inline-flex items-center px-3 py-1.5 rounded-full bg-tint border border-[#D6F2F7] text-deep text-xs font-medium">
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Recommendation Factors — why 9× was recommended */}
+                  <div>
+                    <div className="eyebrow mb-3">Recommendation Factors</div>
+                    <div className="flex flex-wrap gap-2">
+                      {keyFactors.map((f) => (
+                        <span key={f} className="pill pill-neutral">
+                          <CheckCircle className="w-4 h-4" strokeWidth={1.75} />
+                          {f}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -204,11 +225,11 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 <div className="min-w-0">
                   <div className="eyebrow text-soft mb-1">Total Recommended Value</div>
                   <div className="font-mono text-xs text-soft tabular-nums truncate">
-                    {formatCurrency(baseEconomic)} <span className="text-brand">+</span> {formatCurrency(multiplierAdjustment)}
+                    {formatCurrency(baseEconomic)} <span className="text-brand">+</span> {formatCurrency(baseMult)}
                   </div>
                 </div>
                 <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "28px", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
-                  {formatCurrency(totalRecommended)}
+                  {formatCurrency(baseTotal)}
                 </div>
               </div>
 
@@ -226,13 +247,13 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
               <div>
                 <div className="eyebrow mb-1">Recommended Settlement Value</div>
                 <div className="text-ink font-bold tabular-nums" style={{ fontSize: "32px", lineHeight: 1.1, letterSpacing: "-0.02em" }}>
-                  {formatCurrency(totalRecommended)}
+                  {formatCurrency(baseTotal)}
                 </div>
               </div>
 
               <div className="border-t border-line pt-5">
                 <div className="eyebrow mb-1">Recommended Multiplier</div>
-                <div className="text-2xl font-bold text-deep tabular-nums">{multiplier}×</div>
+                <div className="text-2xl font-bold text-deep tabular-nums">{baseMultiplier}×</div>
               </div>
 
               <div className="border-t border-line pt-5">

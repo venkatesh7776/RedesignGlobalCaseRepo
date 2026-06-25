@@ -30,7 +30,7 @@ export function CaseSnapshot({
     caseType ? { label: "Case Type", value: caseType, mono: false } : null,
     caseSubType ? { label: "Sub-Type", value: caseSubType, mono: false } : null,
     jurisdiction ? { label: "Jurisdiction", value: jurisdiction, mono: false } : null,
-    { label: "Case ID", value: caseId, mono: true },
+    { label: "Case ID", value: caseId, mono: false },
     dateOfIncident ? { label: "Date of Incident", value: dateOfIncident, mono: false } : null,
   ].filter(Boolean) as { label: string; value: string; mono: boolean }[];
 

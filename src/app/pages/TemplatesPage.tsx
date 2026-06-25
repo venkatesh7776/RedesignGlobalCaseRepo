@@ -68,11 +68,11 @@ export function TemplatesPage() {
   return (
     <div className="max-w-[1600px] mx-auto p-8 space-y-8">
       <div>
-        <div className="text-xs uppercase tracking-wider text-cyan-600 mb-2">
+        <div className="eyebrow mb-2">
           DRAFTING STANDARDS
         </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Templates</h1>
-        <p className="text-gray-600">
+        <h1 className="page-title mb-2">Templates</h1>
+        <p className="body-text text-[#5B6B78]">
           Manage firm-standard demand templates used across intake, demand generation, and negotiation workflows.
         </p>
       </div>

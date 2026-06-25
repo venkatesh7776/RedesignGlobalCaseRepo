@@ -1,0 +1,416 @@
+/* ============================================================================
+   LexGuard — Legal-grade design system
+   One palette, one set of radii, one shadow language, one type scale.
+   This file is imported LAST so its tokens win over the shadcn defaults.
+   ========================================================================== */
+
+/* ---- Raw brand tokens ---------------------------------------------------- */
+:root {
+  --lg-ink:   #0E3A47; /* headings, high-emphasis, active-stage fills        */
+  --lg-deep:  #1E7C99; /* emphasis text, hover on primary                    */
+  --lg-brand: #3FB5D7; /* PRIMARY cta + the single active state ONLY         */
+  --lg-soft:  #9BDAEC; /* progress fills, active-card borders                */
+  --lg-tint:  #E6F6FB; /* selected rows, hover backgrounds, zone panels      */
+  --lg-wash:  #F4FBFD; /* page background                                    */
+  --lg-line:  #EAEEF2; /* card / divider borders — soft light-gray stroke    */
+  --lg-text:  #0F1E2B; /* body text                                         */
+  --lg-muted: #5B6B78; /* secondary text                                    */
+  --lg-faint: #8A98A3; /* tertiary text, placeholders, idle icons           */
+  --lg-track: #EEF3F6; /* progress-bar track                                 */
+
+  --lg-green: #16A34A; /* complete   */
+  --lg-amber: #D97706; /* in-progress*/
+  --lg-red:   #DC2626; /* risk/alert */
+
+  /* Subtle, premium shadow language — light and used sparingly. */
+  --lg-shadow:    0 1px 2px rgba(14, 58, 71, 0.04);
+  --lg-shadow-md: 0 2px 8px rgba(14, 58, 71, 0.05);
+  --lg-shadow-lg: 0 8px 24px rgba(14, 58, 71, 0.07);
+  --lg-ring: color-mix(in srgb, var(--lg-brand) 40%, transparent);
+}
+
+/* ---- Map the brand palette onto the shadcn semantic layer ---------------
+   so every ui/* primitive (Button, Badge, Card, Input, Progress…) inherits
+   the legal look without per-component edits.                               */
+:root {
+  --background: var(--lg-wash);
+  --foreground: var(--lg-text);
+  --card: #ffffff;
+  --card-foreground: var(--lg-text);
+  --popover: #ffffff;
+  --popover-foreground: var(--lg-text);
+  --primary: var(--lg-brand);
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: var(--lg-deep);
+  --muted: var(--lg-tint);
+  --muted-foreground: var(--lg-muted);
+  --accent: var(--lg-tint);
+  --accent-foreground: var(--lg-ink);
+  --destructive: var(--lg-red);
+  --destructive-foreground: #ffffff;
+  --border: var(--lg-line);
+  --input: var(--lg-line);
+  --input-background: #ffffff;
+  --ring: var(--lg-brand);
+  --radius: 12px;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: var(--lg-text);
+  --sidebar-primary: var(--lg-brand);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--lg-tint);
+  --sidebar-accent-foreground: var(--lg-ink);
+  --sidebar-border: var(--lg-line);
+  --sidebar-ring: var(--lg-brand);
+}
+
+/* ---- Theme tokens: recolor the Tailwind scales the app already uses ------
+   The product was built on cyan/blue/gray utilities. Remapping the scales
+   here recolors the WHOLE product into the legal palette in one place, and
+   collapses the old "bright blue everywhere" into restrained deep/ink/tint.
+   Full-saturation brand is intentionally NOT assigned to any bulk scale step
+   — it is reserved for explicit `bg-primary` / `bg-brand` CTAs.             */
+@theme {
+  /* New, named legal utilities: bg-brand, text-ink, border-line, … */
+  --color-ink:   #0E3A47;
+  --color-deep:  #1E7C99;
+  --color-brand: #3FB5D7;
+  --color-soft:  #9BDAEC;
+  --color-tint:  #E6F6FB;
+  --color-wash:  #F4FBFD;
+  --color-offwhite: #FAFAFA; /* neutral off-white (no blue tint) */
+  --color-line:  #E3EBF0;
+  --color-track: #EEF3F6;
+
+  /* Sky-blue family (cyan) → desaturated legal tones. */
+  --color-cyan-50:  #E6F6FB;
+  --color-cyan-100: #D7EEF5;
+  --color-cyan-200: #9BDAEC;
+  --color-cyan-300: #6FC4DD;
+  --color-cyan-400: #2E9CBE;
+  --color-cyan-500: #1E7C99;
+  --color-cyan-600: #176883;
+  --color-cyan-700: #0E3A47;
+  --color-cyan-800: #0B2E38;
+  --color-cyan-900: #082530;
+
+  /* Stray blues → same legal family. */
+  --color-blue-50:  #E6F6FB;
+  --color-blue-100: #D7EEF5;
+  --color-blue-200: #9BDAEC;
+  --color-blue-300: #6FC4DD;
+  --color-blue-400: #2E9CBE;
+  --color-blue-500: #1E7C99;
+  --color-blue-600: #176883;
+  --color-blue-700: #0E3A47;
+  --color-blue-800: #0B2E38;
+  --color-blue-900: #082530;
+
+  /* Neutrals → cool legal greys. */
+  --color-gray-50:  #F4FBFD;
+  --color-gray-100: #EEF3F6;
+  --color-gray-200: #E3EBF0;
+  --color-gray-300: #CBD7DE;
+  --color-gray-400: #8A98A3;
+  --color-gray-500: #5B6B78;
+  --color-gray-600: #4A5862;
+  --color-gray-700: #33424C;
+  --color-gray-800: #1C2A33;
+  --color-gray-900: #0F1E2B;
+
+  --color-slate-50:  #F4FBFD;
+  --color-slate-100: #EEF3F6;
+  --color-slate-200: #E3EBF0;
+  --color-slate-300: #CBD7DE;
+  --color-slate-400: #8A98A3;
+  --color-slate-500: #5B6B78;
+  --color-slate-600: #4A5862;
+  --color-slate-700: #33424C;
+  --color-slate-800: #1C2A33;
+  --color-slate-900: #0F1E2B;
+
+  --color-neutral-50:  #F4FBFD;
+  --color-neutral-100: #EEF3F6;
+  --color-neutral-200: #E3EBF0;
+  --color-neutral-300: #CBD7DE;
+  --color-neutral-400: #8A98A3;
+  --color-neutral-500: #5B6B78;
+  --color-neutral-600: #4A5862;
+  --color-neutral-700: #33424C;
+  --color-neutral-800: #1C2A33;
+  --color-neutral-900: #0F1E2B;
+
+  /* Status families kept functional; only tame the very-saturated 500s. */
+  --color-yellow-50:  #FFF7ED;
+  --color-yellow-400: #D97706;
+  --color-yellow-500: #D97706;
+  --color-yellow-600: #B45309;
+
+  /* ---- Radius: collapse to a strict 3-tier system ----------------------
+     6px tags/pills · 8px inputs/buttons · 12px cards. No arbitrary radii. */
+  --radius-sm:  6px;
+  --radius-md:  6px;
+  --radius-lg:  8px;
+  --radius-xl:  12px;
+  --radius-2xl: 12px;
+  --radius-3xl: 12px;
+
+  /* ---- Shadow: one soft, low-contrast shadow language ------------------ */
+  --shadow-2xs: 0 1px 2px rgba(14, 58, 71, 0.04);
+  --shadow-xs:  0 1px 2px rgba(14, 58, 71, 0.04);
+  --shadow-sm:  0 1px 2px rgba(14, 58, 71, 0.05);
+  --shadow:     0 1px 2px rgba(14, 58, 71, 0.05);
+  --shadow-md:  0 2px 8px rgba(14, 58, 71, 0.05);
+  --shadow-lg:  0 8px 24px rgba(14, 58, 71, 0.07);
+  --shadow-xl:  0 10px 28px rgba(14, 58, 71, 0.12);
+  --shadow-2xl: 0 14px 36px rgba(14, 58, 71, 0.14);
+
+  /* Type families.
+     --font-display (Onest) → titles & major headings.
+     --font-sans (Inter)    → body, labels, UI, everything else. */
+  --font-display: "Onest", "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ============================================================================
+   Base behaviours
+   ========================================================================== */
+@layer base {
+  html {
+    font-size: 16px;
+  }
+  body {
+    background: var(--lg-wash);
+    color: var(--lg-text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Restrained, weight-driven heading hierarchy (sizes set per-tier below).
+     Headings use the Onest display family for a modern, premium feel. */
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--lg-ink);
+    line-height: 1.2;
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Reference numbers / IDs read as mono, muted, small. */
+  code, kbd, samp, .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus language: a calm brand outline, never a default ring. */
+  *:focus { outline: none; }
+  *:focus-visible {
+    outline: 2px solid var(--lg-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: var(--lg-tint);
+    color: var(--lg-ink);
+  }
+
+  /* Calmer scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--lg-line) transparent;
+  }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--lg-line);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: #CBD7DE; }
+}
+
+/* ============================================================================
+   Reusable system primitives — drop these classes in instead of re-deriving
+   the same look per screen. This is what keeps every screen consistent.
+   ========================================================================== */
+@layer components {
+
+  /* ---- Typography tiers ------------------------------------------------- */
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--lg-muted);
+  }
+  .page-title {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--lg-ink);
+    letter-spacing: -0.02em;
+  }
+  .section-header {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--lg-text);
+    letter-spacing: -0.01em;
+  }
+  .card-title {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--lg-text);
+    letter-spacing: -0.01em;
+  }
+  .body-text {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--lg-text);
+  }
+  .secondary-text {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--lg-muted);
+  }
+  .mono-ref {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    font-size: 12.5px;
+    letter-spacing: -0.01em;
+    color: var(--lg-muted);
+  }
+
+  /* ---- Surfaces --------------------------------------------------------- */
+  .lg-card {
+    background: #ffffff;
+    border: 1px solid var(--lg-line);
+    border-radius: 14px;
+    box-shadow: var(--lg-shadow);
+  }
+  .lg-card-i {
+    transition: transform 150ms ease, box-shadow 150ms ease,
+      border-color 150ms ease;
+  }
+  .lg-card-i:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--lg-shadow-md);
+    border-color: #DCE3E9;
+  }
+  /* A grouped "zone" so a page reads as distinct regions, not one flat sheet */
+  .lg-zone {
+    background: var(--lg-tint);
+    border: 1px solid #DCEEF4;
+    border-radius: 12px;
+  }
+  /* Neutral grey variant of a zone — same shape, no blue tint */
+  .lg-zone-grey {
+    background: #F4F5F6;
+    border-color: #E4E6E8;
+  }
+
+  /* ---- Buttons ---------------------------------------------------------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    padding: 10px 20px;
+    transition: background-color 150ms ease, color 150ms ease,
+      border-color 150ms ease, box-shadow 150ms ease;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--lg-brand);
+    color: #ffffff;
+    border: 1px solid var(--lg-brand);
+  }
+  .btn-primary:hover {
+    background: var(--lg-deep);
+    border-color: var(--lg-deep);
+  }
+  .btn-secondary {
+    background: #ffffff;
+    color: var(--lg-text);
+    border: 1px solid var(--lg-line);
+  }
+  .btn-secondary:hover {
+    background: var(--lg-tint);
+    border-color: #CFE3EB;
+    color: var(--lg-ink);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--lg-deep);
+    border: 1px solid transparent;
+  }
+  .btn-ghost:hover {
+    background: var(--lg-tint);
+    color: var(--lg-ink);
+  }
+
+  /* ---- Pills / tags / status badges ------------------------------------ */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid transparent;
+  }
+  .pill-neutral { background: var(--lg-tint);  color: var(--lg-ink);  border-color: #DCEEF4; }
+  .pill-complete{ background: #ECFDF3; color: #15803D; border-color: #D1FADF; }
+  .pill-progress{ background: #FFF7ED; color: #B45309; border-color: #FDE6C8; }
+  .pill-risk    { background: #FEF2F2; color: #B91C1C; border-color: #FBD5D5; }
+
+  /* ---- KPI / stat block ------------------------------------------------- */
+  .kpi-value {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--lg-ink);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- Slim progress bar ------------------------------------------------ */
+  .lg-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--lg-track);
+    overflow: hidden;
+  }
+  .lg-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--lg-soft), var(--lg-brand));
+    transition: width 300ms ease;
+  }
+
+  /* ---- Row hover / dividers -------------------------------------------- */
+  .lg-row {
+    transition: background-color 150ms ease;
+  }
+  .lg-row:hover { background: var(--lg-tint); }
+}

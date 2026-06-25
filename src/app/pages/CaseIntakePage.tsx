@@ -154,10 +154,10 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
 
   return (
     <>
-      <div className="max-w-[1400px] mx-auto p-8 space-y-6">
+      <div className="max-w-[1400px] mx-auto p-8 space-y-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">CASE INTAKE</h1>
-          <p className="text-gray-600">
+          <h1 className="page-title mb-2">CASE INTAKE</h1>
+          <p className="body-text">
             Monitor incoming personal injury cases as LECO collects records, analyzes evidence, and prepares cases for attorney review.
           </p>
         </div>
@@ -167,15 +167,15 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
         {showEmptyState ? (
           <div className="flex flex-col items-center justify-center py-16 px-4">
             <div className="text-center max-w-md">
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Active Intake Cases</h3>
-              <p className="text-gray-600 mb-6">
+              <h3 className="section-header mb-2">No Active Intake Cases</h3>
+              <p className="body-text mb-6">
                 Create a new personal injury case to begin document collection and analysis.
               </p>
               <Button
                 onClick={() => setShowNewCaseModal(true)}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0 gap-2"
+                className="bg-brand hover:bg-deep text-white border-0 gap-2"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4" strokeWidth={1.75} />
                 New Case
               </Button>
             </div>
@@ -205,21 +205,21 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
 
       {/* New Case Modal */}
       {showNewCaseModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Create New Case</h2>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <h2 className="section-header">Create New Case</h2>
+                  <p className="secondary-text mt-1">
                     Create a new personal injury case record before configuring the client intake request.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowNewCaseModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
@@ -227,7 +227,7 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
             <div className="p-6 space-y-6">
               {/* Case Name */}
               <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
                   Case Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -235,13 +235,13 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
                   value={caseName}
                   onChange={(e) => setCaseName(e.target.value)}
                   placeholder="e.g. Miller vs. SafeRoads"
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-all"
                 />
               </div>
 
               {/* Plaintiff Name */}
               <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
                   Plaintiff Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -249,48 +249,48 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
                   value={plaintiffName}
                   onChange={(e) => setPlaintiffName(e.target.value)}
                   placeholder="e.g. Jane Doe"
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-all"
                 />
               </div>
 
               {/* Grid for Email and Phone */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-2">
-                    Plaintiff Email <span className="text-gray-400">(Optional)</span>
+                  <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
+                    Plaintiff Email <span className="text-[#5B6B78]">(Optional)</span>
                   </label>
                   <input
                     type="email"
                     value={plaintiffEmail}
                     onChange={(e) => setPlaintiffEmail(e.target.value)}
                     placeholder="e.g. jane@clientmail.com"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+                    className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-2">
-                    Plaintiff Phone <span className="text-gray-400">(Optional)</span>
+                  <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
+                    Plaintiff Phone <span className="text-[#5B6B78]">(Optional)</span>
                   </label>
                   <input
                     type="tel"
                     value={plaintiffPhone}
                     onChange={(e) => setPlaintiffPhone(e.target.value)}
                     placeholder="e.g. +1 (555) 000-0000"
-                    className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+                    className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-all"
                   />
                 </div>
               </div>
 
               {/* Jurisdiction */}
               <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
                   Jurisdiction <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={jurisdiction}
                   onChange={(e) => setJurisdiction(e.target.value)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-all"
                 >
                   <option value="">Select jurisdiction...</option>
                   {jurisdictions.map((jur) => (
@@ -303,7 +303,7 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
 
               {/* Case Summary */}
               <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
                   Case Summary / Narrative <span className="text-red-500">*</span>
                 </label>
                 <textarea
@@ -311,41 +311,41 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
                   value={caseSummary}
                   onChange={(e) => setCaseSummary(e.target.value)}
                   placeholder="Brief description of the accident, injuries, liability factors, and any important context for the case."
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 resize-none transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand resize-none transition-all"
                 />
               </div>
 
               {/* Advanced Section Toggle */}
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="text-sm font-medium text-cyan-600 hover:text-cyan-700"
+                className="text-sm font-medium text-deep hover:text-ink"
               >
                 {showAdvanced ? "− Hide" : "+ Show"} Advanced Options
               </button>
 
               {showAdvanced && (
-                <div className="space-y-6 pt-4 border-t border-gray-200">
+                <div className="space-y-6 pt-4 border-t border-line">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">
-                        Date of Incident <span className="text-gray-400">(Optional)</span>
+                      <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
+                        Date of Incident <span className="text-[#5B6B78]">(Optional)</span>
                       </label>
                       <input
                         type="date"
                         value={dateOfIncident}
                         onChange={(e) => setDateOfIncident(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 transition-all"
+                        className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-all"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-2">
-                        Case Type <span className="text-gray-400">(Optional)</span>
+                      <label className="block text-sm font-semibold text-[#0F1E2B] mb-2">
+                        Case Type <span className="text-[#5B6B78]">(Optional)</span>
                       </label>
                       <select
                         value={caseType}
                         onChange={(e) => setCaseType(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 transition-all"
+                        className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-all"
                       >
                         <option value="">Select type...</option>
                         {caseTypes.map((type) => (
@@ -360,20 +360,20 @@ export function CaseIntakePage({ onOpenWorkflow }: CaseIntakePageProps) {
               )}
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-between">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-between">
               <button
                 onClick={() => setShowNewCaseModal(false)}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 text-ink hover:bg-tint rounded-lg text-sm font-medium transition-colors"
               >
                 Cancel
               </button>
               <Button
                 onClick={handleCreateCase}
                 disabled={!caseName || !plaintiffName || !jurisdiction || !caseSummary}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0 gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-brand hover:bg-deep text-white border-0 gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create Case
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
               </Button>
             </div>
           </div>

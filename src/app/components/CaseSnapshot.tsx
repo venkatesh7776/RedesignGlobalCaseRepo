@@ -35,27 +35,29 @@ export function CaseSnapshot({
   ].filter(Boolean) as { label: string; value: string; mono: boolean }[];
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-      {/* Title row */}
-      <div className="px-6 pt-5 pb-4 border-b border-gray-100">
-        <h2 className="text-xl font-bold text-gray-900">{caseName}</h2>
+    <div className="lg-card overflow-hidden">
+      {/* Title row — summary fills the empty space on the right */}
+      <div className="flex items-center gap-8 px-6 pt-6 pb-5 border-b border-line">
+        <div className="shrink-0">
+          <h2 className="section-header">{caseName}</h2>
+        </div>
+        <p className="secondary-text leading-relaxed flex-1 min-w-0 text-right">{summary}</p>
       </div>
 
       {/* Metadata strip */}
-      <div className="flex flex-wrap divide-x divide-gray-100 border-b border-gray-100">
+      <div className="flex flex-wrap divide-x divide-[#EEF3F6]">
         {fields.map(({ label, value, mono }) => (
-          <div key={label} className="flex flex-col px-5 py-3 min-w-0">
-            <span className="text-xs text-gray-400 font-medium mb-0.5 whitespace-nowrap">{label}</span>
-            <span className={`text-sm font-semibold text-gray-900 whitespace-nowrap ${mono ? "font-mono text-cyan-600" : ""}`}>
+          <div key={label} className="flex flex-col px-5 py-4 min-w-0">
+            <span className="eyebrow mb-1.5 whitespace-nowrap">{label}</span>
+            <span
+              className={`whitespace-nowrap ${
+                mono ? "mono-ref" : "text-sm font-semibold text-ink"
+              }`}
+            >
               {value}
             </span>
           </div>
         ))}
-      </div>
-
-      {/* Summary */}
-      <div className="px-6 py-4">
-        <p className="text-sm text-gray-500 leading-relaxed">{summary}</p>
       </div>
     </div>
   );

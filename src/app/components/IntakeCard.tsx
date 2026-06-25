@@ -13,14 +13,6 @@ interface IntakeCardProps {
   onContinue?: () => void;
 }
 
-const stageColors = {
-  Collection: "text-blue-600",
-  Classification: "text-purple-600",
-  Analysis: "text-orange-600",
-  Valuation: "text-pink-600",
-  "Ready For Review": "text-green-600",
-};
-
 export function IntakeCard({
   caseName,
   caseId,
@@ -33,67 +25,60 @@ export function IntakeCard({
   isReady = false,
   onContinue,
 }: IntakeCardProps) {
+  // Stage badge — green when ready for review, calm cyan otherwise.
+  const stageBadge = isReady || stage === "Ready For Review" ? "pill-complete" : "pill-neutral";
+
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer group">
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-gray-900 mb-1">{caseName}</h3>
-        <p className="text-sm text-cyan-600 font-mono mb-3">{caseId}</p>
-
-        <div className="mb-3">
-          <div className="text-xs text-gray-500 mb-1">Plaintiff</div>
-          <div className="text-sm text-gray-900">{plaintiff}</div>
+    <div className="lg-card lg-card-i p-5 cursor-pointer group flex flex-col h-full">
+      {/* Header — case name + stage badge for instant status */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="card-title leading-snug truncate">{caseName}</h3>
+          <p className="mono-ref text-deep mt-0.5">{caseId}</p>
         </div>
-
-        <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-1">Case Summary</div>
-          <p className="text-sm text-gray-700 leading-relaxed">{summary}</p>
-        </div>
-
-        {isReady && claimValue && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <div className="text-xs text-green-600 font-medium mb-1">Estimated Claim Value</div>
-            <div className="text-lg font-semibold text-green-700">{claimValue}</div>
-          </div>
-        )}
+        <span className={`pill shrink-0 ${stageBadge}`}>{stage}</span>
       </div>
 
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Current Stage</div>
-          <div className={`text-sm font-medium ${stageColors[stage as keyof typeof stageColors]}`}>
-            {stage}
-          </div>
-        </div>
+      {/* Plaintiff — inline, low-noise */}
+      <div className="flex items-baseline gap-2 mt-3 text-sm min-w-0">
+        <span className="text-[#5B6B78] shrink-0">Plaintiff</span>
+        <span className="font-semibold text-ink truncate">{plaintiff}</span>
+      </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs text-gray-500">Progress</div>
-            <div className="text-sm font-semibold text-gray-900">{progress}%</div>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-cyan-500 to-cyan-600 rounded-full transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
+      {/* Summary — muted, clamped so cards stay uniform */}
+      <p className="secondary-text leading-relaxed line-clamp-2 mt-2">{summary}</p>
 
-        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-          <div className="text-xs text-gray-500">
-            Last Updated: <span className="text-gray-700">{lastUpdated}</span>
-          </div>
-          <button
-            onClick={onContinue}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all group-hover:gap-3 ${
-              isReady
-                ? "bg-gradient-to-r from-cyan-500 to-cyan-600 text-white hover:from-cyan-400 hover:to-cyan-500"
-                : "text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
-            }`}
-          >
-            {isReady ? "Open Workspace" : "Continue"}
-            <ArrowRight className="w-4 h-4" />
-          </button>
+      {/* Estimated claim value — highlighted for ready cases */}
+      {isReady && claimValue && (
+        <div className="mt-4 px-4 py-3 bg-tint border border-[#D6F2F7] rounded-xl">
+          <div className="eyebrow text-deep mb-0.5">Estimated Claim Value</div>
+          <div className="text-2xl font-bold text-ink tabular-nums">{claimValue}</div>
         </div>
+      )}
+
+      {/* Progress — pinned toward the bottom so all cards align */}
+      <div className="mt-auto pt-5">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="eyebrow">Progress</span>
+          <span className="text-sm font-semibold text-ink tabular-nums">{progress}%</span>
+        </div>
+        <div className="lg-progress">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+
+      {/* Footer — last updated + CTA */}
+      <div className="flex items-center justify-between gap-3 pt-4 mt-4 border-t border-line">
+        <span className="text-xs text-[#5B6B78]">Updated {lastUpdated}</span>
+        <button
+          onClick={onContinue}
+          className={`btn flex items-center gap-2 group-hover:gap-3 ${
+            isReady ? "btn-primary" : "btn-ghost text-deep"
+          }`}
+        >
+          {isReady ? "Open Workspace" : "Continue"}
+          <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+        </button>
       </div>
     </div>
   );

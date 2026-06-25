@@ -88,91 +88,89 @@ const cases = [
 ];
 
 const statusStyles = {
-  cyan: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
-  purple: "bg-purple-500/10 text-purple-400 border-purple-500/30",
-  orange: "bg-orange-500/10 text-orange-400 border-orange-500/30",
-  gray: "bg-gray-500/10 text-gray-400 border-gray-500/30",
-  green: "bg-green-500/10 text-green-400 border-green-500/30",
-  yellow: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
-  blue: "bg-blue-500/10 text-blue-400 border-blue-500/30",
+  cyan: "pill pill-progress",
+  purple: "pill pill-progress",
+  orange: "pill pill-progress",
+  gray: "pill pill-neutral",
+  green: "pill pill-complete",
+  yellow: "pill pill-progress",
+  blue: "pill pill-neutral",
 };
 
 export function CaseTable() {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+    <div className="lg-card overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
+            <tr className="border-b border-line bg-wash">
+              <th className="eyebrow px-4 py-4 text-left border-r border-line">
                 Case ID
               </th>
-              <th className="px-6 py-4 text-left text-xs font-medium text-white/60 uppercase tracking-wider border-r border-white/5">
+              <th className="eyebrow px-4 py-4 text-left border-r border-line">
                 Client Details
               </th>
-              <th className="px-6 py-4 text-left text-xs font-medium text-white/60 uppercase tracking-wider border-r border-white/5">
+              <th className="eyebrow px-4 py-4 text-left border-r border-line">
                 Jurisdiction
               </th>
-              <th className="px-6 py-4 text-left text-xs font-medium text-white/60 uppercase tracking-wider border-r border-white/5">
+              <th className="eyebrow px-4 py-4 text-left border-r border-line">
                 Current Status
               </th>
-              <th className="px-6 py-4 text-left text-xs font-medium text-white/60 uppercase tracking-wider border-r border-white/5">
+              <th className="eyebrow px-4 py-4 text-left border-r border-line">
                 Missing Items
               </th>
-              <th className="px-6 py-4 text-right text-xs font-medium text-white/60 uppercase tracking-wider">
+              <th className="eyebrow px-4 py-4 text-right">
                 Action
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody>
             {cases.map((case_) => (
               <tr
                 key={case_.id}
-                className="hover:bg-gray-50 transition-colors cursor-pointer group"
+                className="lg-row border-b border-line cursor-pointer group"
               >
-                <td className="px-6 py-4 border-r border-gray-200">
-                  <div className="text-sm font-mono text-cyan-600">{case_.id}</div>
+                <td className="px-4 py-4 border-r border-line">
+                  <div className="mono-ref text-deep">{case_.id}</div>
                 </td>
-                <td className="px-6 py-4 border-r border-gray-200">
-                  <div className="text-sm text-gray-900 font-medium">
+                <td className="px-4 py-4 border-r border-line">
+                  <div className="card-title">
                     {case_.client} vs {case_.defendant}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">{case_.injury}</div>
+                  <div className="secondary-text mt-1">{case_.injury}</div>
                 </td>
-                <td className="px-6 py-4 border-r border-gray-200">
-                  <div className="text-sm text-gray-700">{case_.jurisdiction}</div>
+                <td className="px-4 py-4 border-r border-line">
+                  <div className="body-text">{case_.jurisdiction}</div>
                 </td>
-                <td className="px-6 py-4 border-r border-gray-200">
+                <td className="px-4 py-4 border-r border-line">
                   <div>
                     <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border ${
-                        statusStyles[case_.statusColor as keyof typeof statusStyles]
-                      }`}
+                      className={statusStyles[case_.statusColor as keyof typeof statusStyles]}
                     >
                       {case_.status}
                     </span>
-                    <div className="text-xs text-gray-400 mt-1.5">{case_.lastUpdated}</div>
+                    <div className="secondary-text mt-1.5">{case_.lastUpdated}</div>
                   </div>
                 </td>
-                <td className="px-6 py-4 border-r border-gray-200">
+                <td className="px-4 py-4 border-r border-line">
                   <div
                     className={`text-sm ${
                       case_.missingItems === "No Issues" || case_.missingItems === "Complete"
-                        ? "text-green-600"
-                        : "text-orange-600"
+                        ? "text-deep"
+                        : "text-ink"
                     }`}
                   >
                     {case_.missingItems}
                   </div>
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   <div className="flex items-center justify-end">
-                    <button className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-700 transition-colors group-hover:gap-2">
+                    <button className="btn btn-ghost flex items-center gap-1.5 text-deep group-hover:gap-2">
                       {case_.actionLabel}
                       {case_.actionLabel === "View" ? (
-                        <Eye className="w-4 h-4" />
+                        <Eye className="w-4 h-4" strokeWidth={1.75} />
                       ) : (
-                        <ArrowRight className="w-4 h-4" />
+                        <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                       )}
                     </button>
                   </div>

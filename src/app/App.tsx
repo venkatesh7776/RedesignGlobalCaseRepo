@@ -12,6 +12,8 @@ import { ClassificationPage } from "./pages/ClassificationPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { ValuationPage } from "./pages/ValuationPage";
 import { CaseReadyPage } from "./pages/CaseReadyPage";
+import { NotesProvider } from "./notes/NotesContext";
+import { FloatingNotes } from "./components/FloatingNotes";
 import {
   PipelineState, CaseDocument, AttorneyNote,
   classifyDocuments, generateAnalysisFindings
@@ -66,6 +68,7 @@ export default function App() {
   const [activePage, setActivePage] = useState("intake");
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [pipeline, setPipeline] = useState<PipelineState>(INITIAL_PIPELINE);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const updatePipeline = (updates: Partial<PipelineState>) => {
     setPipeline((prev) => ({ ...prev, ...updates }));
@@ -79,6 +82,13 @@ export default function App() {
     setSelectedCase(caseData);
     setPipeline(buildPipelineForCase(caseData));
     setActivePage("workflow");
+    setSidebarCollapsed(true);
+  };
+
+  // Navigating via the sidebar always returns to a top-level page, so expand it.
+  const handleNavigate = (page: string) => {
+    setActivePage(page);
+    setSidebarCollapsed(false);
   };
 
   const handleStageNavigation = (stageName: string) => {
@@ -168,13 +178,32 @@ export default function App() {
     }
   };
 
+  // Map the active page to the intake-pipeline stage the Notes button reports.
+  const STAGE_BY_PAGE: Record<string, string> = {
+    workflow: "Collection",
+    classification: "Collection",
+    analysis: "Analysis",
+    valuation: "Valuation",
+    "case-ready": "Case Ready",
+  };
+  const currentStage = STAGE_BY_PAGE[activePage] ?? "";
+  const currentCaseName = selectedCase?.caseName ?? "";
+
   return (
-    <div className="h-screen bg-gray-50 flex overflow-hidden">
-      <DashboardSidebar activePage={activePage} onNavigate={setActivePage} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <DashboardTopbar />
-        <main className="flex-1 overflow-auto">{renderPage()}</main>
+    <NotesProvider caseName={currentCaseName} stage={currentStage}>
+      <div className="h-screen bg-gray-50 flex overflow-hidden">
+        <DashboardSidebar
+          activePage={activePage}
+          onNavigate={handleNavigate}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <DashboardTopbar />
+          <main className="flex-1 overflow-auto">{renderPage()}</main>
+        </div>
       </div>
-    </div>
+      <FloatingNotes />
+    </NotesProvider>
   );
 }

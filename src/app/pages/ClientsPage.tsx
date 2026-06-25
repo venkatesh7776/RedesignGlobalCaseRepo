@@ -9,11 +9,11 @@ export function ClientsPage() {
   return (
     <div className="max-w-[1800px] mx-auto p-8 space-y-8">
       <div>
-        <div className="text-xs uppercase tracking-wider text-cyan-600 mb-2">
+        <div className="eyebrow mb-2">
           CLIENT DIRECTORY
         </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Clients</h1>
-        <p className="text-gray-600">
+        <h1 className="page-title mb-2">Clients</h1>
+        <p className="body-text text-[#5B6B78]">
           All active and historical plaintiffs across personal injury matters.
         </p>
       </div>

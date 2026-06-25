@@ -84,10 +84,10 @@ const JURISDICTIONS = ["Cook County, IL", "Harris County, TX", "Los Angeles Coun
 
 const STATUS_STYLES: Record<string, string> = {
   "Ready For Review": "bg-green-50 text-green-700 border-green-200",
-  "Attorney Active": "bg-cyan-50 text-cyan-700 border-cyan-200",
-  "Drafting Demand": "bg-blue-50 text-blue-700 border-blue-200",
-  "In Negotiation": "bg-purple-50 text-purple-700 border-purple-200",
-  "Awaiting Filing": "bg-orange-50 text-orange-700 border-orange-200",
+  "Attorney Active": "bg-tint text-ink border-[#DCEEF4]",
+  "Drafting Demand": "bg-tint text-deep border-[#DCEEF4]",
+  "In Negotiation": "bg-tint text-ink border-[#DCEEF4]",
+  "Awaiting Filing": "bg-[#FFF7ED] text-[#B45309] border-[#FDE6C8]",
 };
 
 function formatCurrency(n: number) {
@@ -122,20 +122,20 @@ export function GlobalCaseRepoPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-6">
+    <div className="min-h-screen bg-wash">
+      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-8">
 
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Active Litigation Case Workspaces</h1>
-            <p className="text-gray-600">Select a completed litigation matter to review evidence, prepare strategy, draft demands, and manage case execution.</p>
+            <h1 className="page-title mb-2">Active Litigation Case Workspaces</h1>
+            <p className="body-text">Select a completed litigation matter to review evidence, prepare strategy, draft demands, and manage case execution.</p>
           </div>
-          <div className="shrink-0 flex items-center gap-3 px-5 py-3 bg-white border border-gray-200 rounded-2xl">
-            <Archive className="w-5 h-5 text-gray-400" />
+          <div className="lg-card shrink-0 flex items-center gap-3 px-5 py-3">
+            <Archive className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
             <div className="text-right">
-              <div className="text-xs text-gray-500 font-medium">Managed Archives</div>
-              <div className="text-lg font-bold text-gray-900">6 Cases</div>
+              <div className="eyebrow">Managed Archives</div>
+              <div className="kpi-value">6 Cases</div>
             </div>
           </div>
         </div>
@@ -143,20 +143,20 @@ export function GlobalCaseRepoPage() {
         {/* Search + Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search cases, plaintiffs, defendants, case IDs..."
-              className="w-full bg-white border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-400 transition-colors"
+              className="w-full bg-white border border-line rounded-lg pl-10 pr-4 py-2.5 text-sm text-[#0F1E2B] placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-colors"
             />
           </div>
           <div className="flex gap-2 flex-wrap">
             <select
               value={caseTypeFilter}
               onChange={(e) => setCaseTypeFilter(e.target.value)}
-              className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:border-cyan-400 transition-colors"
+              className="bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-colors"
             >
               <option value="All">Case Type</option>
               {CASE_TYPES.map((t) => <option key={t}>{t}</option>)}
@@ -164,7 +164,7 @@ export function GlobalCaseRepoPage() {
             <select
               value={jurisdictionFilter}
               onChange={(e) => setJurisdictionFilter(e.target.value)}
-              className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:border-cyan-400 transition-colors"
+              className="bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-colors"
             >
               <option value="All">Jurisdiction</option>
               {JURISDICTIONS.map((j) => <option key={j}>{j}</option>)}
@@ -172,7 +172,7 @@ export function GlobalCaseRepoPage() {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:border-cyan-400 transition-colors"
+              className="bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-[#0F1E2B] focus:outline-none focus:border-brand transition-colors"
             >
               <option value="recent">Recently Updated</option>
               <option value="value">Highest Value</option>
@@ -182,19 +182,19 @@ export function GlobalCaseRepoPage() {
         </div>
 
         {/* Results count */}
-        <div className="text-sm text-gray-500">
+        <div className="secondary-text">
           {filtered.length} matter{filtered.length !== 1 ? "s" : ""} ready for review
         </div>
 
         {/* Grid */}
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-6">
-              <Archive className="w-8 h-8 text-gray-300" />
+            <div className="w-16 h-16 bg-tint rounded-xl flex items-center justify-center mb-6">
+              <Archive className="w-8 h-8 text-[#5B6B78]" strokeWidth={1.75} />
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">No Cases Ready For Workspace</h2>
-            <p className="text-sm text-gray-500 mb-6 max-w-sm">Cases that complete the Intake Pipeline will automatically appear here.</p>
-            <button className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl text-sm font-medium transition-colors">
+            <h2 className="section-header mb-2">No Cases Ready For Workspace</h2>
+            <p className="secondary-text mb-6 max-w-sm">Cases that complete the Intake Pipeline will automatically appear here.</p>
+            <button className="px-5 py-2.5 bg-brand hover:bg-deep text-white rounded-lg text-sm font-medium transition-colors">
               Go To Intake Pipeline
             </button>
           </div>
@@ -205,28 +205,28 @@ export function GlobalCaseRepoPage() {
               return (
                 <div
                   key={c.id}
-                  className="bg-white border border-gray-200 rounded-2xl flex flex-col hover:shadow-lg hover:border-gray-300 transition-all group overflow-hidden"
+                  className="lg-card lg-card-i flex flex-col shadow-sm transition-all group overflow-hidden p-0"
                 >
                   {/* Card header band */}
-                  <div className="px-6 pt-5 pb-4 border-b border-gray-100">
+                  <div className="px-6 pt-5 pb-4 border-b border-line">
                     <div className="flex items-start justify-between gap-3 mb-3">
-                      <span className="inline-flex items-center px-2.5 py-1 bg-cyan-50 text-cyan-700 text-xs font-semibold rounded-lg border border-cyan-100">
+                      <span className="inline-flex items-center px-2.5 py-1 bg-tint text-ink text-xs font-semibold rounded-md border border-[#DCEEF4]">
                         {c.caseType}
                       </span>
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium border shrink-0 ${STATUS_STYLES[status] ?? "bg-gray-100 text-gray-600 border-gray-200"}`}>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border shrink-0 ${STATUS_STYLES[status] ?? "bg-track text-[#5B6B78] border-line"}`}>
                         {status}
                       </span>
                     </div>
-                    <h2 className="text-lg font-bold text-gray-900 group-hover:text-cyan-700 transition-colors leading-snug mb-0.5">
+                    <h2 className="card-title group-hover:text-deep transition-colors leading-snug mb-0.5">
                       {c.caseName}
                     </h2>
-                    <span className="text-xs font-mono text-gray-400">{c.id}</span>
+                    <span className="mono-ref">{c.id}</span>
                   </div>
 
                   {/* Value */}
-                  <div className="px-6 py-3 border-b border-gray-100 flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Est. Value</span>
-                    <span className="text-xs font-medium text-gray-600">{formatCurrency(c.estimatedLow)} – {formatCurrency(c.estimatedHigh)}</span>
+                  <div className="px-6 py-3 border-b border-line flex items-center gap-2">
+                    <span className="eyebrow">Est. Value</span>
+                    <span className="text-xs font-medium text-[#0F1E2B]">{formatCurrency(c.estimatedLow)} – {formatCurrency(c.estimatedHigh)}</span>
                   </div>
 
                   {/* Body */}
@@ -234,31 +234,31 @@ export function GlobalCaseRepoPage() {
                     {/* Parties */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Plaintiff</div>
-                        <div className="text-sm text-gray-900 font-medium leading-tight">{c.plaintiff}</div>
+                        <div className="eyebrow mb-1">Plaintiff</div>
+                        <div className="text-sm text-[#0F1E2B] font-medium leading-tight">{c.plaintiff}</div>
                       </div>
                       <div>
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Defendant</div>
-                        <div className="text-sm text-gray-900 font-medium leading-tight">{c.defendant}</div>
+                        <div className="eyebrow mb-1">Defendant</div>
+                        <div className="text-sm text-[#0F1E2B] font-medium leading-tight">{c.defendant}</div>
                       </div>
                     </div>
 
                     {/* Summary */}
-                    <p className="text-sm text-gray-500 leading-relaxed line-clamp-2 flex-1">
+                    <p className="text-sm text-[#5B6B78] leading-relaxed line-clamp-2 flex-1">
                       {c.summary}
                     </p>
 
                     {/* Metadata */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1">
                       {c.jurisdiction && (
-                        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                          <MapPin className="w-3 h-3 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-xs text-[#5B6B78]">
+                          <MapPin className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                           {c.jurisdiction}
                         </div>
                       )}
                       {c.dateOfIncident && (
-                        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                          <Calendar className="w-3 h-3 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-xs text-[#5B6B78]">
+                          <Calendar className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                           {c.dateOfIncident}
                         </div>
                       )}
@@ -266,13 +266,13 @@ export function GlobalCaseRepoPage() {
                   </div>
 
                   {/* CTA footer */}
-                  <div className="px-6 py-4 border-t border-gray-100">
+                  <div className="px-6 py-4 border-t border-line">
                     <button
                       onClick={() => handleOpenWorkspace(c.id)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-900 hover:bg-cyan-600 text-white rounded-xl text-sm font-semibold transition-colors"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-ink hover:bg-deep text-white rounded-lg text-sm font-semibold transition-colors"
                     >
                       Open Workspace
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                     </button>
                   </div>
                 </div>

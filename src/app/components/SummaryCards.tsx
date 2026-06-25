@@ -2,40 +2,40 @@ import { AlertTriangle, Clock, Send, MessageSquare } from "lucide-react";
 
 const summaryData = [
   {
-    title: "Cases Needing Attention",
+    label: "Cases Needing Attention",
     count: 8,
     icon: AlertTriangle,
-    color: "red",
-    gradient: "from-red-500/20 to-red-600/20",
-    iconColor: "text-red-400",
-    borderColor: "border-red-500/20",
+    pill: "Action required",
+    pillClass: "pill-risk",
+    iconClass: "text-[#B91C1C]",
+    iconWrap: "bg-[#FEF2F2]",
   },
   {
-    title: "Ready for Review",
+    label: "Ready for Review",
     count: 12,
     icon: Clock,
-    color: "yellow",
-    gradient: "from-yellow-500/20 to-yellow-600/20",
-    iconColor: "text-yellow-400",
-    borderColor: "border-yellow-500/20",
+    pill: "In queue",
+    pillClass: "pill-progress",
+    iconClass: "text-[#B45309]",
+    iconWrap: "bg-[#FFF7ED]",
   },
   {
-    title: "Ready for Demand",
+    label: "Ready for Demand",
     count: 5,
     icon: Send,
-    color: "cyan",
-    gradient: "from-cyan-500/20 to-cyan-600/20",
-    iconColor: "text-cyan-400",
-    borderColor: "border-cyan-500/20",
+    pill: "Staged",
+    pillClass: "pill-neutral",
+    iconClass: "text-deep",
+    iconWrap: "bg-tint",
   },
   {
-    title: "Negotiation Active",
+    label: "Negotiation Active",
     count: 15,
     icon: MessageSquare,
-    color: "green",
-    gradient: "from-green-500/20 to-green-600/20",
-    iconColor: "text-green-400",
-    borderColor: "border-green-500/20",
+    pill: "On track",
+    pillClass: "pill-complete",
+    iconClass: "text-[#15803D]",
+    iconWrap: "bg-[#ECFDF3]",
   },
 ];
 
@@ -44,16 +44,19 @@ export function SummaryCards() {
     <div className="grid grid-cols-4 gap-4">
       {summaryData.map((item) => (
         <button
-          key={item.title}
-          className={`bg-gradient-to-br ${item.gradient} border ${item.borderColor} rounded-xl p-5 hover:scale-[1.02] transition-transform cursor-pointer group`}
+          key={item.label}
+          className="lg-card lg-card-i p-6 text-left cursor-pointer"
         >
-          <div className="flex items-start justify-between mb-3">
-            <div className={`p-2.5 rounded-lg bg-black/30 ${item.iconColor}`}>
-              <item.icon className="w-5 h-5" />
+          <div className="flex items-start justify-between mb-4">
+            <div className={`p-2.5 rounded-lg ${item.iconWrap} ${item.iconClass}`}>
+              <item.icon className="w-5 h-5" strokeWidth={1.75} />
             </div>
-            <div className="text-3xl font-bold text-white">{item.count}</div>
           </div>
-          <div className="text-sm text-white/80 text-left">{item.title}</div>
+          <div className="eyebrow mb-2">{item.label}</div>
+          <div className="flex items-end justify-between gap-2">
+            <div className="kpi-value">{item.count}</div>
+            <span className={`pill ${item.pillClass} mb-1`}>{item.pill}</span>
+          </div>
         </button>
       ))}
     </div>

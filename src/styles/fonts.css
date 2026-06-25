@@ -1,0 +1,5 @@
+/* Onest — display type family (titles & headings).
+   Inter — primary UI/body type family.
+   Both fall back to the system sans stack if the network is unavailable, so the
+   UI degrades gracefully. */
+@import url("https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");

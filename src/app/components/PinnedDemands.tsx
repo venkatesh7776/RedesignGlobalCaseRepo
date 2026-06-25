@@ -25,29 +25,29 @@ export function PinnedDemands() {
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
-        <Pin className="w-4 h-4 text-cyan-400" />
-        <h2 className="text-sm font-medium text-white/90">Pinned Demands</h2>
+        <Pin className="w-4 h-4 text-deep" strokeWidth={1.75} />
+        <h2 className="section-header">Pinned Demands</h2>
       </div>
 
       <div className="flex gap-3">
         {pinnedDemands.map((demand) => (
           <button
             key={demand.caseId}
-            className="flex-1 bg-white/[0.03] border border-white/10 rounded-lg p-4 hover:bg-white/[0.05] hover:border-cyan-500/30 transition-all text-left group"
+            className="lg-card lg-card-i flex-1 p-4 text-left group"
           >
             <div className="flex items-start gap-3 mb-2">
-              <div className="p-2 bg-cyan-500/10 rounded-lg">
-                <FileText className="w-4 h-4 text-cyan-400" />
+              <div className="p-2 bg-tint rounded-lg">
+                <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
               </div>
               <div className="flex-1">
-                <div className="text-xs text-cyan-400 mb-1">{demand.caseId}</div>
-                <div className="text-sm font-medium text-white group-hover:text-cyan-400 transition-colors">
+                <div className="mono-ref text-deep mb-1">{demand.caseId}</div>
+                <div className="card-title group-hover:text-deep transition-colors">
                   {demand.client}
                 </div>
               </div>
             </div>
-            <div className="text-xs text-white/60 mb-1">{demand.injury}</div>
-            <div className="text-sm font-semibold text-white">{demand.amount}</div>
+            <div className="secondary-text mb-1">{demand.injury}</div>
+            <div className="text-sm font-semibold text-ink">{demand.amount}</div>
           </button>
         ))}
       </div>

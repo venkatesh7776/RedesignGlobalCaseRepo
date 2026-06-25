@@ -80,11 +80,11 @@ export function DemandLibraryPage() {
   return (
     <div className="max-w-[1400px] mx-auto p-8 space-y-8">
       <div>
-        <div className="text-xs uppercase tracking-wider text-cyan-600 mb-2">
+        <div className="eyebrow mb-2">
           DEMAND INTELLIGENCE
         </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Demand Library</h1>
-        <p className="text-gray-600">
+        <h1 className="page-title mb-2">Demand Library</h1>
+        <p className="body-text text-[#5B6B78]">
           Search, review, and reference demand packages across all cases.
         </p>
       </div>

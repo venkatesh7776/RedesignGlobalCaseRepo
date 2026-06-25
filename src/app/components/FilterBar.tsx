@@ -2,17 +2,17 @@ import { Search } from "lucide-react";
 
 export function FilterBar() {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-3">
       <div className="flex-1 relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Search strokeWidth={1.75} className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A98A3]" />
         <input
           type="text"
           placeholder="Search by Plaintiff, Defendant, Case ID..."
-          className="w-full bg-white border border-gray-200 rounded-lg pl-10 pr-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+          className="w-full bg-white border border-line rounded-lg pl-10 pr-4 py-2.5 text-sm text-[#0F1E2B] placeholder:text-[#8A98A3] focus:outline-none focus:border-brand transition-colors"
         />
       </div>
 
-      <select className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 cursor-pointer hover:bg-gray-50 transition-all min-w-[200px]">
+      <select className="bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-[#33424C] focus:outline-none focus:border-brand cursor-pointer hover:bg-tint transition-colors min-w-[200px]">
         <option value="all">All Statuses</option>
         <option value="demand">Ready for Demand</option>
         <option value="negotiation">Negotiation</option>
@@ -22,7 +22,7 @@ export function FilterBar() {
         <option value="settled">Settled</option>
       </select>
 
-      <select className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 cursor-pointer hover:bg-gray-50 transition-all min-w-[200px]">
+      <select className="bg-white border border-line rounded-lg px-3 py-2.5 text-sm text-[#33424C] focus:outline-none focus:border-brand cursor-pointer hover:bg-tint transition-colors min-w-[200px]">
         <option value="all">All Cases</option>
         <option value="missing">Missing Items</option>
         <option value="today">Updated Today</option>

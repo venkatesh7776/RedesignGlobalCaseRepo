@@ -130,11 +130,11 @@ export function CommunicationPage() {
   return (
     <div className="max-w-[1800px] mx-auto p-8 space-y-6">
       <div>
-        <div className="text-xs uppercase tracking-wider text-cyan-600 mb-2">
+        <div className="eyebrow mb-2">
           COMMUNICATION CENTER
         </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Communication</h1>
-        <p className="text-gray-600">
+        <h1 className="page-title mb-2">Communication</h1>
+        <p className="body-text text-[#5B6B78]">
           All case-related messages, negotiations, client requests, and responses across every matter.
         </p>
       </div>

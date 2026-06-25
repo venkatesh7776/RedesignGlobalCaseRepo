@@ -17,47 +17,47 @@ interface ThreadListProps {
 }
 
 const statusStyles = {
-  orange: "bg-orange-500/10 text-orange-400 border-orange-500/30",
-  purple: "bg-purple-500/10 text-purple-400 border-purple-500/30",
-  cyan: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
-  green: "bg-green-500/10 text-green-400 border-green-500/30",
-  gray: "bg-gray-500/10 text-gray-400 border-gray-500/30",
+  orange: "pill pill-progress",
+  purple: "pill pill-progress",
+  cyan: "pill pill-neutral",
+  green: "pill pill-complete",
+  gray: "pill pill-neutral",
 };
 
 export function ThreadList({ threads, selectedId, onSelect }: ThreadListProps) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden h-[calc(100vh-280px)]">
-      <div className="divide-y divide-gray-200 overflow-y-auto h-full">
+    <div className="lg-card overflow-hidden h-[calc(100vh-280px)] shadow-sm">
+      <div className="divide-y divide-line overflow-y-auto h-full">
         {threads.map((thread) => (
           <button
             key={thread.id}
             onClick={() => onSelect(thread.id)}
-            className={`w-full p-4 text-left hover:bg-gray-50 transition-all ${
-              selectedId === thread.id ? "bg-cyan-50 border-l-2 border-cyan-500" : ""
-            } ${thread.unread ? "bg-blue-50/50" : ""}`}
+            className={`lg-row w-full py-4 px-4 text-left transition-all ${
+              selectedId === thread.id ? "bg-tint border-l-2 border-brand" : ""
+            }`}
           >
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center gap-2">
                 {thread.unread && (
-                  <div className="w-2 h-2 bg-cyan-500 rounded-full flex-shrink-0"></div>
+                  <div className="w-2 h-2 bg-brand rounded-full flex-shrink-0"></div>
                 )}
-                <h3 className={`font-medium ${thread.unread ? "text-gray-900" : "text-gray-700"}`}>
+                <h3 className={`card-title ${thread.unread ? "text-ink" : "text-[#5B6B78]"}`}>
                   {thread.sender}
                 </h3>
               </div>
-              <span className="text-xs text-gray-500 whitespace-nowrap ml-2">{thread.time}</span>
+              <span className="mono-ref whitespace-nowrap ml-2">{thread.time}</span>
             </div>
 
-            <p className={`text-sm mb-2 line-clamp-1 ${thread.unread ? "text-gray-700" : "text-gray-600"}`}>
+            <p className={`text-sm mb-2 line-clamp-1 ${thread.unread ? "text-ink" : "text-[#5B6B78]"}`}>
               {thread.subject}
             </p>
 
             <div className="flex items-center justify-between">
-              <span className="text-xs text-cyan-600">
+              <span className="mono-ref text-deep">
                 {thread.caseId} • {thread.clientName}
               </span>
               <span
-                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${
+                className={`${
                   statusStyles[thread.statusColor as keyof typeof statusStyles]
                 }`}
               >

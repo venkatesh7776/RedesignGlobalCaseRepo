@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import {
-  ChevronLeft, CheckCircle, FileText, Eye, Download, X, Send,
-  AlertCircle, ArrowRight, User, Building2, Calendar, Shield,
-  Mail, MessageSquare
+  ChevronLeft, ChevronRight, CheckCircle, FileText, Eye, Download, X,
+  AlertCircle, ArrowRight, User, Building2, Shield, Scale, Stethoscope,
+  Users, Bot, Sparkles
 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { DocActions, DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import {
-  CaseDocument, classifyDocuments,
-  generateAnalysisFindings, detectMissingEvidence
+  CaseDocument, classifyDocuments, generateAnalysisFindings,
 } from "../types/case";
 
 /* MARKER-MAKE-KIT-INVOKED */
@@ -27,111 +27,205 @@ interface AnalysisPageProps {
   onProceedToValuation?: () => void;
 }
 
-const aiQuickPrompts = [
-  "Summarize this document",
-  "What injuries are mentioned?",
-  "Extract treatment dates",
-  "Identify medical providers",
-  "Highlight key findings",
+// Case narrative — incident → treatment → injury → damages → case ready
+interface TimelineEvent {
+  id: string;
+  date: string;
+  title: string;       // brief title shown in the navigation card
+  cardTitle: string;   // heading shown in the intelligence panel
+  summary: string;
+  evidence: string[];
+  liabilityImpact?: string;
+  injuryImpact?: string;
+}
+
+const timelineEvents: TimelineEvent[] = [
+  {
+    id: "stroke-symptoms",
+    date: "Feb 7, 2026",
+    title: "Stroke symptoms observed by caregiver",
+    cardTitle: "Stroke Symptoms Detected",
+    summary: "Caregiver documented facial droop, slurred speech, and right-side weakness consistent with acute stroke onset.",
+    evidence: ["Caregiver_Log.pdf", "Facility_Incident_Report.pdf"],
+    liabilityImpact: "Establishes that facility staff observed and documented clear stroke indicators, triggering a duty to escalate care immediately.",
+    injuryImpact: "Documents the onset of acute neurological symptoms that mark the beginning of the critical treatment window.",
+  },
+  {
+    id: "911-delay",
+    date: "Feb 7, 2026",
+    title: "Delayed 911 emergency response",
+    cardTitle: "Delayed 911 Emergency Response",
+    summary: "Facility staff delayed emergency escalation for approximately 145 minutes after documented stroke symptoms, creating a significant treatment delay.",
+    evidence: ["Caregiver_Log.pdf", "Facility_Call_Log.pdf", "Emergency_Dispatch_Record.pdf"],
+    liabilityImpact: "May establish breach of duty, failure to follow emergency escalation protocols, and negligent delay in treatment.",
+    injuryImpact: "Potential worsening of neurological damage due to delayed intervention during the critical stroke treatment window.",
+  },
+  {
+    id: "hospital-admission",
+    date: "Feb 7, 2026",
+    title: "Hospital admission & intake",
+    cardTitle: "Hospital Admission & Intake",
+    summary: "Patient admitted to Cook County Medical Center emergency department with acute neurological deficits and documented time of arrival.",
+    evidence: ["ER_Admission_Record.pdf", "Triage_Notes.pdf", "Emergency_Dispatch_Record.pdf", "Vitals_Chart.pdf"],
+    liabilityImpact: "Hospital intake timestamps corroborate the duration of the escalation delay attributable to the facility.",
+    injuryImpact: "Admission findings establish baseline severity of neurological injury upon reaching emergency care.",
+  },
+  {
+    id: "mri-confirmation",
+    date: "Feb 9, 2026",
+    title: "MRI confirms ischemic stroke",
+    cardTitle: "MRI Confirms Ischemic Stroke",
+    summary: "MRI imaging confirmed ischemic stroke with permanent neurological injury and associated functional loss.",
+    evidence: ["MRI_Cervical.pdf", "Radiology_Report.pdf"],
+    liabilityImpact: "Objective imaging links the delayed intervention to a confirmed, diagnosable injury.",
+    injuryImpact: "Confirms permanent neurological injury and provides the clinical basis for long-term damages.",
+  },
+  {
+    id: "rehabilitation",
+    date: "Mar 4, 2026",
+    title: "Rehabilitation begins",
+    cardTitle: "Rehabilitation Begins",
+    summary: "Patient began an ongoing course of physical and occupational therapy to address persistent right-side weakness.",
+    evidence: ["Physical_Therapy_Notes.pdf", "Rehab_Care_Plan.pdf", "Treatment_Records.pdf"],
+    liabilityImpact: "Continuity of care documents the ongoing consequences flowing from the initial negligent delay.",
+    injuryImpact: "Demonstrates the extent of rehabilitation required and supports future care damages.",
+  },
+  {
+    id: "lost-wages",
+    date: "Apr 1, 2026",
+    title: "Lost wages documented",
+    cardTitle: "Lost Wages Documented",
+    summary: "Employment and wage records document loss of income resulting from the disability period following the stroke.",
+    evidence: ["Wage_Loss_Statement.pdf", "Employer_Verification.pdf"],
+    liabilityImpact: "Connects the defendant's negligence to quantifiable economic harm suffered by the plaintiff.",
+    injuryImpact: "Supports economic damages by tying the injury to a measurable loss of earning capacity.",
+  },
+  {
+    id: "current-condition",
+    date: "May 20, 2026",
+    title: "Current condition assessed",
+    cardTitle: "Current Condition Assessed",
+    summary: "Latest evaluation documents persistent functional impairment and chronic limitations affecting daily living.",
+    evidence: ["Physical_Therapy_Notes.pdf", "Treatment_Records.pdf"],
+    liabilityImpact: "Establishes lasting harm directly traceable to the chain of events beginning with the delay.",
+    injuryImpact: "Documents permanent impairment and chronic limitations supporting non-economic damages.",
+  },
+  {
+    id: "case-ready",
+    date: "Jun 11, 2026",
+    title: "Case ready for valuation",
+    cardTitle: "Case Ready For Valuation",
+    summary: "All liability and injury evidence has been verified and organized — the case is ready to advance to valuation.",
+    evidence: [],
+    liabilityImpact: "Verified liability chain is fully documented and ready to support a demand.",
+    injuryImpact: "Injury severity and ongoing damages are substantiated across the medical record.",
+  },
 ];
+
+// Total events LECO extracted from the record; the timeline surfaces only the key ones
+const EXTRACTED_EVENT_COUNT = 53;
 
 export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToIntake, onProceedToValuation }: AnalysisPageProps) {
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState<CaseDocument & { category?: string; source?: string } | null>(null);
-  const [aiMessages, setAiMessages] = useState<Array<{ role: string; content: string }>>([]);
-  const [aiInput, setAiInput] = useState("");
+  // Each entry is one item's set of supporting documents; the workspace pages
+  // between items (Prev/Next) and shows each item's documents as viewer tabs.
+  const [docSets, setDocSets] = useState<any[][]>([]);
+  const [setContexts, setSetContexts] = useState<({ contextType: string; reference: string } | undefined)[]>([]);
+  const [setIndex, setSetIndex] = useState(0);
+  const activeSet = docSets[setIndex] ?? [];
+  const activeContext = setContexts[setIndex];
+  // Which view the Document Workspace opens into: "preview" (80/20 doc + action rail),
+  // "insights" (60/40 doc + AI panel), or "chat" (AI panel in chat mode).
+  const [workspaceView, setWorkspaceView] = useState<"preview" | "insights" | "chat">("preview");
+  // Index of the timeline event shown in the detail drawer (null = closed)
+  const [drawerEventIndex, setDrawerEventIndex] = useState<number | null>(null);
+  // Discovered Signals: active tab + whether each tab is expanded past the first 3
+  const [signalTab, setSignalTab] = useState<"liability" | "injury">("liability");
+  const [signalExpanded, setSignalExpanded] = useState<{ liability: boolean; injury: boolean }>({ liability: false, injury: false });
 
   // Derive everything from shared documents
   const categories = classifyDocuments(documents);
   const signals = generateAnalysisFindings(categories);
-  const missingEvidence = detectMissingEvidence(categories);
   const verifiedDocuments = documents.map((d) => ({
     ...d,
-    category: categories.find((c) => c.docs.some((f) => f.id === d.id))?.name ?? "General",
+    category: categories.find((c) => c.docs.some((f) => f.id === d.id))?.name ?? "General Documents",
     status: "Verified",
     source: d.source === "Plaintiff" ? "Plaintiff" : "Attorney Office",
   }));
   const hasFindings = signals.length > 0;
 
-  // Missing document request modal
-  const [showRequestModal, setShowRequestModal] = useState(false);
-  const [checkedDocs, setCheckedDocs] = useState<Record<string, boolean>>(
-    Object.fromEntries(missingEvidence.map((m) => [m.title, true]))
-  );
-  const [deliveryMethod, setDeliveryMethod] = useState<"email" | "sms">("email");
-  const clientEmail = "evelyn.miller@email.com";
-  const clientPhone = "(555) 123-4567";
-
-  const selectedDocTitles = missingEvidence.filter((m) => checkedDocs[m.title]).map((m) => m.title);
-
-  const generateMessage = (docs: string[]) =>
-    `Hello Evelyn,\n\nWe are currently reviewing your case and require additional documents to continue our evaluation.\n\nRequested Documents:\n${docs.map((d) => `• ${d}`).join("\n")}\n\nPlease upload the requested documents using the secure intake link below.\n\nIf you have any questions or are unable to obtain a document, please contact our office.\n\nThank you,\nJennifer Davis\nLexGuard Injury Intel`;
-
-  const [messageText, setMessageText] = useState(() => generateMessage(missingEvidence.map((m) => m.title)));
-
-  const openRequestModal = () => {
-    const allTitles = missingEvidence.map((m) => m.title);
-    setCheckedDocs(Object.fromEntries(allTitles.map((t) => [t, true])));
-    setMessageText(generateMessage(allTitles));
-    setShowRequestModal(true);
-  };
-
-  const handleDocCheck = (title: string, checked: boolean) => {
-    const next = { ...checkedDocs, [title]: checked };
-    setCheckedDocs(next);
-    const selected = missingEvidence.filter((m) => next[m.title]).map((m) => m.title);
-    setMessageText(generateMessage(selected));
-  };
-
-  const canSend = selectedDocTitles.length > 0;
+  const liabilitySignals = signals.filter((s) => s.kind === "liability");
+  const injurySignals = signals.filter((s) => s.kind === "injury");
+  const liabilityCount = liabilitySignals.length;
+  const injuryCount = injurySignals.length;
+  const verifiedCount = verifiedDocuments.length || 12;
 
   const defaultCaseData = {
     caseName: "Estate of Miller vs Logistics Co.",
     caseId: "PI-2024-001",
     plaintiff: "Evelyn Miller",
     summary: "Motor vehicle accident resulting in cervical disc herniation and ongoing physical therapy.",
-    jurisdiction: "Cook County, IL",
+    jurisdiction: "Cook County, Illinois",
   };
 
   const data = { ...defaultCaseData, ...caseData };
 
-  const handleDocumentView = (doc: typeof verifiedDocuments[number]) => {
-    setSelectedDocument(doc);
-    setAiMessages([]);
+  const docForFile = (file: string) =>
+    verifiedDocuments.find((d) => d.name === file) ??
+    ({ id: file, name: file, source: "Attorney Office", date: "Jun 8, 2026", status: "Verified", category: "General Documents" } as typeof verifiedDocuments[number]);
+
+  // Open the unified Document Workspace. `sets` is a list of items, each item
+  // being its own array of supporting documents (rendered as viewer tabs);
+  // `contexts` is the parallel note-context for each item (signal/document).
+  const openSets = (
+    sets: any[][],
+    contexts: ({ contextType: string; reference: string } | undefined)[],
+    index = 0,
+    view: "preview" | "insights" | "chat" = "preview",
+  ) => {
+    setDocSets(sets);
+    setSetContexts(contexts);
+    setSetIndex(index);
+    setWorkspaceView(view);
     setShowDocumentPreview(true);
   };
 
-  const handleSendAiMessage = (text?: string) => {
-    const message = text ?? aiInput;
-    if (!message.trim()) return;
-    setAiMessages((prev) => [
-      ...prev,
-      { role: "user", content: message },
-      {
-        role: "assistant",
-        content:
-          "Based on the document, here is a simulated LECO analysis response. In production this would reflect the actual document content and provide attorney-grade insights.",
-      },
-    ]);
-    setAiInput("");
+  // Opened directly from a drawer's supporting evidence (single document).
+  const openChatForFile = (file: string) => openSets([[docForFile(file)]], [{ contextType: "Document", reference: file }], 0, "chat");
+  const openPreviewForFile = (file: string) => openSets([[docForFile(file)]], [{ contextType: "Document", reference: file }], 0, "preview");
+
+  // Analysis Complete panel → smooth-scroll navigation into the matching section
+  const scrollToId = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const goToSignals = (tab: "liability" | "injury") => {
+    setSignalTab(tab);
+    setTimeout(() => scrollToId("signals-section"), 60);
   };
 
+  // Case Intelligence Summary fields
+  const summaryRows = [
+    { icon: User, label: "Plaintiff", value: data.plaintiff },
+    { icon: Building2, label: "Defendant", value: "Memory Care Facility LLC" },
+    { icon: Shield, label: "Insurance Carrier", value: "ABC Professional Liability Insurance" },
+    { icon: Scale, label: "Jurisdiction", value: data.jurisdiction },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-wash">
       {/* Breadcrumb */}
-      <div className="bg-white border-b border-gray-200">
+      <div className="bg-white sticky top-0 z-40">
         <div className="max-w-[1400px] mx-auto px-8 py-4">
           <div className="flex items-center gap-4">
             <button
               onClick={onBackToIntake}
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex items-center gap-2 secondary-text hover:text-ink transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />
               Back to Case Intake
             </button>
-            <div className="text-sm text-gray-500">
+            <div className="secondary-text ml-auto">
               Case Intake <span className="mx-2">›</span>
-              <span className="text-gray-900 font-medium">{data.caseName}</span>
+              <span className="text-ink font-medium">{data.caseName}</span>
             </div>
           </div>
         </div>
@@ -139,189 +233,301 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
 
       <StageNavigator currentStage="Analysis" onStageClick={onStageClick} />
 
-      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-6">
+      <div className="max-w-[1400px] mx-auto px-8 py-8 space-y-8">
 
         {documents.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-6">
-              <AlertCircle className="w-8 h-8 text-gray-300" />
+            <div className="w-16 h-16 bg-tint rounded-xl flex items-center justify-center mb-6">
+              <AlertCircle className="w-8 h-8 text-[#5B6B78]" strokeWidth={1.75} />
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Not enough evidence to generate intelligence findings</h2>
-            <p className="text-sm text-gray-500 mb-6 max-w-sm">LECO requires supporting documentation before identifying liability signals.</p>
+            <h2 className="section-header mb-2">Not enough evidence to generate intelligence findings</h2>
+            <p className="secondary-text mb-6 max-w-sm">LECO requires supporting documentation before identifying liability signals.</p>
             <div className="flex gap-3">
-              <button onClick={() => onStageClick?.("Client Intake")} className="px-5 py-2.5 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Request Additional Documents</button>
+              <button onClick={() => onStageClick?.("Client Intake")} className="btn btn-secondary">Request Additional Documents</button>
             </div>
           </div>
         )}
 
         {documents.length > 0 && !hasFindings && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center">
-            <AlertCircle className="w-8 h-8 text-orange-400 mx-auto mb-3" />
-            <h2 className="text-base font-semibold text-gray-900 mb-1">Not enough evidence to generate intelligence findings</h2>
-            <p className="text-sm text-gray-500">Upload police reports or medical records to unlock liability and injury signals.</p>
+          <div className="lg-card p-6 text-center">
+            <AlertCircle className="w-8 h-8 text-deep mx-auto mb-3" strokeWidth={1.75} />
+            <h2 className="card-title mb-1">Not enough evidence to generate intelligence findings</h2>
+            <p className="secondary-text">Upload police reports or medical records to unlock liability and injury signals.</p>
           </div>
         )}
 
         {documents.length > 0 && (
         <>
-        {/* Page Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="inline-flex items-center px-3 py-1 bg-cyan-50 border border-cyan-200 rounded-lg text-xs font-semibold text-cyan-700 mb-3">
-              STAGE 03 ACTIVE
+        {/* Page Header — current stage */}
+        <h1 className="text-[24px] font-semibold leading-tight">
+          <span className="text-[#5B6B78]">Stage 2 -</span> <span className="text-ink">Analysis</span>
+        </h1>
+
+        {/* ── Case Intelligence + Timeline Hero (45 / 55) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-[45fr_55fr] gap-6 items-start">
+
+          {/* LEFT (45%) — Case Intelligence Summary, compact card grid (sticky while timeline scrolls) */}
+          <div className="lg-card p-6 flex flex-col lg:sticky lg:top-[150px] self-start">
+            <div className="flex items-center gap-2.5 mb-5">
+              <h2 className="section-header">Case Intelligence Summary</h2>
+              <span className="pill pill-complete">92% Complete</span>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Case Intelligence & Analysis</h1>
-            <p className="text-gray-600">LECO has analyzed all verified evidence and generated attorney-ready case intelligence.</p>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg mt-1">
-            <CheckCircle className="w-5 h-5 text-green-600" />
-            <span className="text-sm font-medium text-green-700">Analysis Complete</span>
-          </div>
-        </div>
 
-        {/* ── ROW: Signals + Controls ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-
-          {/* LEFT: Discovered Liability & Injury Signals */}
-          <div className="lg:col-span-2 bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Discovered Liability & Injury Signals</h2>
-            <p className="text-sm text-gray-500 mb-6">The most important liability and injury findings identified by LECO from verified evidence.</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {signals.map((item, i) => (
-                <div key={i} className="border border-gray-200 rounded-xl p-5 flex flex-col">
-                  <div className="text-xs font-semibold tracking-widest text-cyan-600 uppercase mb-2">{item.tag}</div>
-                  <h3 className="text-base font-bold text-gray-900 mb-2 leading-snug">{item.title}</h3>
-                  <p className="text-sm text-gray-600 leading-relaxed flex-1">{item.description}</p>
-                  <div className="mt-5 pt-4 border-t border-gray-100">
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Source Documents</div>
-                    <ul className="space-y-1.5 mb-3">
-                      {item.sources.map((src) => (
-                        <li key={src} className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                          <span className="text-xs text-gray-700 font-mono">{src}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <button className="text-sm font-medium text-cyan-600 hover:text-cyan-700 transition-colors">
-                      View Sources
-                    </button>
+            <div className="grid grid-cols-2 gap-3">
+              {summaryRows.map(({ icon: Icon, label, value }) => (
+                <div key={label} className="lg-zone lg-zone-grey p-4">
+                  <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                    <Icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    {label}
                   </div>
+                  <p className="text-sm font-semibold text-ink leading-snug">{value}</p>
                 </div>
               ))}
+
+              <div className="lg-zone lg-zone-grey p-4">
+                <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                  <Users className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                  Key Witnesses
+                </div>
+                <p className="text-sm font-semibold text-ink leading-snug">Officer D. Vance</p>
+                <p className="text-sm font-semibold text-ink leading-snug">John Peterson</p>
+              </div>
+
+              <div className="lg-zone lg-zone-grey p-4">
+                <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                  <Stethoscope className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                  Primary Medical Providers
+                </div>
+                <p className="text-sm font-semibold text-ink leading-snug">Cook County Medical Center</p>
+                <p className="text-sm font-semibold text-ink leading-snug">Physical Therapy Associates</p>
+              </div>
+
+              <div className="lg-zone lg-zone-grey p-4">
+                <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                  <Shield className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                  Verified Evidence
+                </div>
+                <p className="text-sm font-semibold text-ink leading-snug">{verifiedCount} <span className="font-medium text-[#5B6B78]">Documents</span></p>
+              </div>
+
+              <div className="lg-zone lg-zone-grey p-4">
+                <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                  <CheckCircle className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                  Analysis Status
+                </div>
+                <span className="pill pill-complete">Complete</span>
+              </div>
             </div>
+
+            {/* Primary CTA pinned full-width at the bottom */}
+            <Button
+              onClick={onProceedToValuation}
+              className="btn btn-primary gap-2 w-full mt-5"
+            >
+              Proceed To Valuation
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </Button>
           </div>
 
-          {/* RIGHT: Analysis Controls */}
-          <div className="lg:col-span-1 bg-white border border-gray-200 rounded-2xl p-6 sticky top-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">Analysis Controls</h2>
+          {/* RIGHT (55%) — High-level Case Timeline */}
+          <div className="lg-card p-6">
+            <h2 className="section-header mb-1">Case Timeline Overview</h2>
+            <p className="secondary-text mb-5">{timelineEvents.length} Key Events from {EXTRACTED_EVENT_COUNT} Extracted Events</p>
 
-            <div className="space-y-5">
-              <div>
-                <div className="flex items-center gap-2 text-xs text-gray-500 font-medium mb-1.5">
-                  <Calendar className="w-3.5 h-3.5" />
-                  Analysis Period
-                </div>
-                <p className="text-sm text-gray-900">May 15, 2026 – Jun 11, 2026</p>
-              </div>
+            <div className="relative">
+              {timelineEvents.map((ev, i) => {
+                const isLast = i === timelineEvents.length - 1;
+                return (
+                  <div key={ev.id} className="relative flex gap-3 pb-3 last:pb-0">
+                    {/* Marker + connector line */}
+                    <div className="flex flex-col items-center shrink-0">
+                      <div className="w-3 h-3 rounded-full border-2 bg-white border-soft mt-2.5" />
+                      {!isLast && <div className="w-px flex-1 bg-line mt-1" />}
+                    </div>
 
-              <div className="border-t border-gray-100 pt-5">
-                <div className="flex items-center gap-2 text-xs text-gray-500 font-medium mb-1.5">
-                  <User className="w-3.5 h-3.5" />
-                  Witnesses Identified
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-gray-900">Officer D. Vance</p>
-                  <p className="text-sm text-gray-900">John Peterson</p>
-                </div>
-              </div>
-
-              <div className="border-t border-gray-100 pt-5">
-                <div className="flex items-center gap-2 text-xs text-gray-500 font-medium mb-1.5">
-                  <Building2 className="w-3.5 h-3.5" />
-                  Medical Providers
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-gray-900">Cook County Medical Center</p>
-                  <p className="text-sm text-gray-900">Physical Therapy Associates</p>
-                </div>
-              </div>
-
-              <div className="border-t border-gray-100 pt-5">
-                <div className="flex items-center gap-2 text-xs text-gray-500 font-medium mb-1.5">
-                  <Shield className="w-3.5 h-3.5" />
-                  Verified Documents
-                </div>
-                <p className="text-2xl font-bold text-gray-900">12</p>
-              </div>
-
-              <div className="border-t border-gray-100 pt-5">
-                <Button
-                  onClick={onProceedToValuation}
-                  className="w-full bg-cyan-500 hover:bg-cyan-600 text-white border-0 gap-2"
-                >
-                  Proceed To Valuation
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
+                    {/* Compact event card — date, title, supporting doc count + View Details */}
+                    <button
+                      onClick={() => setDrawerEventIndex(i)}
+                      className="group flex-1 flex items-center justify-between gap-3 text-left rounded-lg border border-line bg-white px-4 py-2.5 mb-1 transition-colors hover:border-soft hover:bg-wash"
+                    >
+                      <div className="min-w-0">
+                        <div className="mono-ref mb-1">{ev.date}</div>
+                        <div className="text-sm font-semibold text-ink leading-snug mb-1.5">{ev.title}</div>
+                        <div className="flex items-center gap-1.5 secondary-text">
+                          <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                          {ev.evidence.length} Supporting {ev.evidence.length === 1 ? "Doc" : "Docs"}
+                        </div>
+                      </div>
+                      <span className="flex items-center gap-1 text-sm font-medium text-deep opacity-60 group-hover:opacity-100 transition-opacity shrink-0">
+                        View Details
+                        <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
+        {/* ── Analysis Summary + Signals (20 / 80) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-[20fr_80fr] gap-6 items-start">
+
+        {/* RIGHT (80%) — Signals + Evidence Verification (the tall, scrolling column) */}
+        <div className="space-y-8 min-w-0 lg:order-2">
+
+        {/* ── Discovered Liability & Injury Signals ── */}
+        <div id="signals-section" className="lg-card p-6 scroll-mt-[150px]">
+            <h2 className="section-header mb-1">Discovered Liability & Injury Signals</h2>
+            <p className="secondary-text mb-5">The most important liability and injury findings identified by LECO — each links to the verified evidence behind it.</p>
+
+            {/* Tabs */}
+            <div className="flex items-center gap-2 mb-6">
+              {([
+                { key: "liability", label: "Liability Signals", count: liabilityCount },
+                { key: "injury", label: "Injury Signals", count: injuryCount },
+              ] as const).map((tab) => {
+                const isActive = signalTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setSignalTab(tab.key)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      isActive
+                        ? "bg-tint border-brand text-deep"
+                        : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
+                    }`}
+                  >
+                    {tab.label} ({tab.count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {(() => {
+              const list = signalTab === "liability" ? liabilitySignals : injurySignals;
+              const expanded = signalExpanded[signalTab];
+              const visible = expanded ? list : list.slice(0, 3);
+              const remaining = list.length - 3;
+              const KindIcon = signalTab === "liability" ? Scale : Stethoscope;
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {visible.map((item, i) => (
+                      <div
+                        key={i}
+                        className="lg-card-i rounded-xl border border-line bg-white flex flex-col"
+                      >
+                        <div className="p-5 flex flex-col flex-1">
+                          {/* Eyebrow label */}
+                          <div className="eyebrow flex items-center gap-1.5 mb-2">
+                            <KindIcon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                            {item.tag}
+                          </div>
+
+                          {/* Title */}
+                          <h3 className="card-title mb-2 leading-snug">{item.title}</h3>
+
+                          {/* Summary */}
+                          <p className="body-text leading-relaxed">{item.description}</p>
+
+                          {/* Supporting evidence count */}
+                          <div className="mt-4 pt-4 border-t border-line">
+                            <div className="eyebrow mb-1.5">Evidence</div>
+                            <div className="flex items-center gap-1.5 secondary-text">
+                              <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                              {item.evidence.length} Supporting {item.evidence.length === 1 ? "Document" : "Documents"}
+                            </div>
+                          </div>
+
+                          {/* Actions — pinned to the bottom; Preview & Insights open the same
+                              workspace. Each signal's full set of supporting documents shows as
+                              viewer tabs; Prev/Next pages between the visible signals. */}
+                          <div className="mt-auto pt-4 flex items-center gap-2">
+                            <button
+                              onClick={() => openSets(
+                                visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
+                                visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
+                                i, "preview",
+                              )}
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
+                            >
+                              <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
+                            </button>
+                            <button
+                              onClick={() => openSets(
+                                visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
+                                visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
+                                i, "insights",
+                              )}
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
+                            >
+                              <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {list.length > 3 && (
+                    <div className="mt-5 flex justify-center">
+                      <button
+                        onClick={() => setSignalExpanded((prev) => ({ ...prev, [signalTab]: !prev[signalTab] }))}
+                        className="btn btn-secondary gap-2"
+                      >
+                        {expanded ? "Show Fewer Findings" : `View ${remaining} More Findings`}
+                        <ArrowRight className={`w-4 h-4 transition-transform ${expanded ? "-rotate-90" : ""}`} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
         {/* ── Evidence Verification ── */}
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-          <div className="px-6 py-5 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Evidence Verification</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Inspect the source documents used during analysis.</p>
+        <div id="evidence-verification" className="lg-card !p-0 overflow-hidden scroll-mt-[150px]">
+          <div className="px-6 py-5 border-b border-line">
+            <h2 className="section-header">Evidence Verification</h2>
+            <p className="secondary-text mt-0.5">Inspect the source documents used during analysis.</p>
           </div>
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-wash border-b border-line">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Document Name</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Category</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
+                <th className="px-6 py-3 text-left eyebrow">Document Name</th>
+                <th className="px-6 py-3 text-left eyebrow">Category</th>
+                <th className="px-6 py-3 text-left eyebrow">Status</th>
+                <th className="px-6 py-3 text-right eyebrow">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-line">
               {verifiedDocuments.map((doc, i) => (
-                <tr key={i} className="hover:bg-gray-50 transition-colors">
+                <tr key={doc.id} className="lg-row transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-gray-400 shrink-0" />
-                      <span className="text-sm text-gray-900">{doc.name}</span>
+                      <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                      <span className="mono-ref text-ink">{doc.name}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      doc.category === "Liability"
-                        ? "bg-blue-50 text-blue-700"
-                        : "bg-purple-50 text-purple-700"
-                    }`}>
+                    <span className="pill pill-neutral">
                       {doc.category}
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      <span className="text-sm font-medium text-green-700">{doc.status}</span>
-                    </div>
+                    <span className="pill pill-complete">
+                      <CheckCircle className="w-4 h-4" strokeWidth={1.75} />
+                      {doc.status}
+                    </span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handleDocumentView(doc)}
-                        className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-700 font-medium transition-colors"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        View
-                      </button>
-                      <span className="text-gray-200">|</span>
-                      <button className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-700 font-medium transition-colors">
-                        <Download className="w-3.5 h-3.5" />
-                        Download
-                      </button>
-                    </div>
+                    <DocActions
+                      size="sm"
+                      onPreview={() => openSets(verifiedDocuments.map((d) => [d]), verifiedDocuments.map((d) => ({ contextType: "Document", reference: d.name })), i, "preview")}
+                      onInsights={() => openSets(verifiedDocuments.map((d) => [d]), verifiedDocuments.map((d) => ({ contextType: "Document", reference: d.name })), i, "insights")}
+                      onDownload={() => {}}
+                    />
                   </td>
                 </tr>
               ))}
@@ -329,306 +535,189 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
           </table>
         </div>
 
-        {/* ── Missing Evidence Analysis ── */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Missing Evidence Analysis</h2>
-          <p className="text-sm text-gray-500 mb-6">Evidence gaps discovered during analysis that may affect liability or damages.</p>
+        </div>{/* end signals/evidence column */}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            {missingEvidence.map((item, i) => (
-              <div key={i} className="border border-gray-200 rounded-xl p-5">
-                <div className="flex items-start gap-3 mb-4">
-                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-900 mb-1.5">{item.title}</h4>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700 border border-orange-100">
-                      Missing
-                    </span>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">
-                    <span className="font-medium text-gray-700">Expected: </span>
-                    <span className="font-mono">{item.expected}</span>
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    <span className="font-medium text-gray-700">Reason: </span>
-                    {item.reason}
-                  </div>
-                </div>
+        {/* LEFT (20%) — Analysis Complete: sticky progress + navigation panel */}
+        <div className="lg:order-1 lg:sticky lg:top-[150px] self-start">
+          <div className="lg-card p-5">
+            {/* Header */}
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-full bg-tint border border-line flex items-center justify-center shrink-0">
+                <CheckCircle className="w-5 h-5 text-deep" strokeWidth={1.75} />
               </div>
-            ))}
-          </div>
-
-          {/* Follow-up Request */}
-          <div className="border border-gray-200 rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Missing Evidence Follow-Up</h3>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Recipient</div>
-                <div className="text-sm font-medium text-gray-900">Evelyn Miller</div>
-                <div className="text-sm text-gray-500">evelyn.miller@email.com</div>
+              <div className="min-w-0">
+                <h2 className="card-title leading-tight">Analysis Complete</h2>
+                <p className="secondary-text leading-snug">Case Intelligence Generated Successfully</p>
               </div>
-              <Button onClick={openRequestModal} className="bg-cyan-500 hover:bg-cyan-600 text-white border-0">
-                Send Missing Document Request
-              </Button>
             </div>
+
+            {/* Stacked, clickable summary cards */}
+            <div className="space-y-3">
+              {([
+                { value: liabilityCount, label: "Liability Signals", onClick: () => goToSignals("liability") },
+                { value: injuryCount, label: "Injury Signals", onClick: () => goToSignals("injury") },
+                { value: verifiedCount, label: "Verified Evidence", onClick: () => scrollToId("evidence-verification") },
+              ] as const).map(({ value, label, onClick }) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className="group w-full lg-zone rounded-xl p-4 text-left flex items-center justify-between gap-3 transition-all hover:border-soft hover:bg-wash hover:shadow-sm active:scale-[0.99]"
+                >
+                  <div>
+                    <div className="kpi-value leading-none">{value}</div>
+                    <div className="eyebrow mt-1.5">{label}</div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-deep shrink-0 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all" strokeWidth={1.75} />
+                </button>
+              ))}
+            </div>
+
+            {/* Primary CTA */}
+            <Button onClick={onProceedToValuation} className="btn btn-primary gap-2 w-full mt-4">
+              Proceed To Valuation
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </Button>
           </div>
         </div>
 
-        {/* ── Proceed to Valuation ── */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900 mb-1">Ready to proceed?</h3>
-            <p className="text-sm text-gray-500">All core analysis is complete. Advance to Valuation to calculate case value.</p>
-          </div>
-          <Button
-            onClick={onProceedToValuation}
-            className="bg-cyan-500 hover:bg-cyan-600 text-white border-0 gap-2"
-          >
-            Proceed To Valuation
-            <ArrowRight className="w-4 h-4" />
-          </Button>
-        </div>
+        </div>{/* end Signals + Analysis Summary grid */}
 
         </>
         )}
 
       </div>
 
-      {/* ── Missing Document Request Modal ── */}
-      {showRequestModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
-
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200 shrink-0">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Missing Document Request</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Review and approve before sending to client</p>
-              </div>
-              <button
-                onClick={() => setShowRequestModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto p-6 space-y-6">
-
-              {/* Section 1 — Missing Documents */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Missing Documents</h3>
-                <p className="text-xs text-gray-500 mb-3">Uncheck any document you do not want to request.</p>
-                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
-                  {missingEvidence.map((item) => (
-                    <label
-                      key={item.title}
-                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!!checkedDocs[item.title]}
-                        onChange={(e) => handleDocCheck(item.title, e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 accent-cyan-500"
-                      />
-                      <div>
-                        <div className="text-sm text-gray-900">{item.title}</div>
-                        <div className="text-xs text-gray-400 font-mono">{item.expected}</div>
-                      </div>
-                    </label>
-                  ))}
+      {/* ── Timeline Event Detail Drawer ── */}
+      {drawerEventIndex !== null && (() => {
+        const ev = timelineEvents[drawerEventIndex];
+        const isFirst = drawerEventIndex === 0;
+        const isLast = drawerEventIndex === timelineEvents.length - 1;
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-ink/50" onClick={() => setDrawerEventIndex(null)} />
+            <div className="relative bg-white w-full sm:w-[42vw] sm:min-w-[440px] sm:max-w-[760px] h-full flex flex-col shadow-sm">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 px-6 py-4 border-b border-line shrink-0">
+                <div>
+                  <div className="eyebrow mb-1.5">Event {drawerEventIndex + 1} of {EXTRACTED_EVENT_COUNT}</div>
+                  <h2 className="section-header leading-snug">{ev.cardTitle}</h2>
+                  <div className="mono-ref mt-1">{ev.date}</div>
                 </div>
-                {selectedDocTitles.length === 0 && (
-                  <p className="text-xs text-orange-600 mt-2">Select at least one document to send a request.</p>
-                )}
+                <button onClick={() => setDrawerEventIndex(null)} className="p-2 hover:bg-tint rounded-lg transition-colors shrink-0">
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+                </button>
               </div>
 
-              {/* Section 2 — Delivery Method */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Send To</h3>
-                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
-                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input
-                      type="radio"
-                      name="delivery"
-                      value="email"
-                      checked={deliveryMethod === "email"}
-                      onChange={() => setDeliveryMethod("email")}
-                      className="w-4 h-4 accent-cyan-500"
-                    />
-                    <Mail className="w-4 h-4 text-gray-400 shrink-0" />
-                    <div>
-                      <div className="text-sm text-gray-900">Email</div>
-                      <div className="text-xs text-gray-500">{clientEmail}</div>
-                    </div>
-                  </label>
-                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input
-                      type="radio"
-                      name="delivery"
-                      value="sms"
-                      checked={deliveryMethod === "sms"}
-                      onChange={() => setDeliveryMethod("sms")}
-                      className="w-4 h-4 accent-cyan-500"
-                    />
-                    <MessageSquare className="w-4 h-4 text-gray-400 shrink-0" />
-                    <div>
-                      <div className="text-sm text-gray-900">SMS</div>
-                      <div className="text-xs text-gray-500">{clientPhone}</div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Section 3 — Message Preview */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Message Preview</h3>
-                <p className="text-xs text-gray-500 mb-3">This message was generated automatically. You may edit it before sending.</p>
-                <textarea
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  rows={10}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 leading-relaxed focus:outline-none focus:border-cyan-400 transition-colors resize-none bg-gray-50"
-                />
-              </div>
-
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 shrink-0">
-              <Button
-                onClick={() => setShowRequestModal(false)}
-                className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </Button>
-              <Button
-                disabled={!canSend}
-                onClick={() => setShowRequestModal(false)}
-                className="bg-cyan-500 hover:bg-cyan-600 text-white border-0 gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Send className="w-4 h-4" />
-                Send Request
-              </Button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ── Document Preview Modal ── */}
-      {showDocumentPreview && selectedDocument && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden shadow-2xl">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900">{selectedDocument.name}</h2>
-                <p className="text-xs text-gray-500">{selectedDocument.category} · {selectedDocument.source}</p>
-              </div>
-              <button
-                onClick={() => setShowDocumentPreview(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Split Panels */}
-            <div className="flex-1 flex overflow-hidden">
-              {/* Left — Document Preview */}
-              <div className="flex-1 border-r border-gray-200 overflow-auto bg-gray-50 p-6 space-y-4">
-                <div className="bg-white border border-gray-200 rounded-xl p-4">
-                  <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3">Document Metadata</h3>
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                    {[
-                      { label: "Document Name", value: selectedDocument.name },
-                      { label: "Category", value: selectedDocument.category },
-                      { label: "Upload Date", value: selectedDocument.date },
-                      { label: "Source", value: selectedDocument.source },
-                      { label: "Status", value: selectedDocument.status },
-                    ].map(({ label, value }) => (
-                      <div key={label}>
-                        <div className="text-xs text-gray-400 mb-0.5">{label}</div>
-                        <div className="text-sm text-gray-900 font-medium">{value}</div>
-                      </div>
-                    ))}
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Supporting Documents — shown immediately */}
+                <div>
+                  <div className="eyebrow flex items-center gap-1.5 mb-3">
+                    <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                    Supporting Documents
                   </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-xl flex items-center justify-center min-h-[440px]">
-                  <div className="text-center">
-                    <FileText className="w-14 h-14 text-gray-200 mx-auto mb-3" />
-                    <p className="text-sm text-gray-400">Document Preview</p>
-                    <p className="text-xs text-gray-300 mt-1">{selectedDocument.name}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right — LECO Document Assistant */}
-              <div className="w-96 flex flex-col bg-white shrink-0">
-                <div className="px-5 py-4 border-b border-gray-200 shrink-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="w-2 h-2 rounded-full bg-cyan-500" />
-                    <h3 className="text-sm font-semibold text-gray-900">LECO Document Assistant</h3>
-                  </div>
-                  <p className="text-xs text-gray-500">Answers based on this document only</p>
-                </div>
-
-                <div className="flex-1 overflow-auto p-5 space-y-3">
-                  {aiMessages.length === 0 ? (
-                    <div>
-                      <p className="text-xs text-gray-400 mb-3">Try asking:</p>
-                      <div className="space-y-2">
-                        {aiQuickPrompts.map((prompt) => (
-                          <button
-                            key={prompt}
-                            onClick={() => handleSendAiMessage(prompt)}
-                            className="w-full text-left text-xs text-gray-700 bg-gray-50 hover:bg-cyan-50 hover:text-cyan-700 border border-gray-200 hover:border-cyan-200 rounded-lg px-3 py-2.5 transition-colors"
-                          >
-                            {prompt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                  {ev.evidence.length === 0 ? (
+                    <p className="secondary-text">No supporting documents linked to this event.</p>
                   ) : (
-                    aiMessages.map((msg, idx) => (
-                      <div key={idx} className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                        <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
-                          msg.role === "user" ? "bg-cyan-500 text-white" : "bg-gray-100 text-gray-900"
-                        }`}>
-                          {msg.content}
+                    <div className="space-y-2.5">
+                      {ev.evidence.map((file) => (
+                        <div key={file} className="rounded-lg border border-line bg-wash p-3">
+                          <div className="flex items-center gap-2 mb-2.5">
+                            <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                            <span className="mono-ref text-ink truncate">{file}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => openPreviewForFile(file)}
+                              className="flex items-center gap-1.5 text-xs font-medium text-deep hover:text-ink px-2.5 py-1.5 rounded-lg hover:bg-tint transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> Preview
+                            </button>
+                            <button
+                              className="flex items-center gap-1.5 text-xs font-medium text-deep hover:text-ink px-2.5 py-1.5 rounded-lg hover:bg-tint transition-colors"
+                            >
+                              <Download className="w-3.5 h-3.5" strokeWidth={1.75} /> Download
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      ))}
+                    </div>
                   )}
                 </div>
 
-                <div className="border-t border-gray-200 p-4 shrink-0">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={aiInput}
-                      onChange={(e) => setAiInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSendAiMessage()}
-                      placeholder="Ask about this document..."
-                      className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-400 transition-colors"
-                    />
-                    <button
-                      onClick={() => handleSendAiMessage()}
-                      className="px-3 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg transition-colors"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+                {/* AI Summary */}
+                <div className="pt-5 border-t border-line">
+                  <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                    <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    AI Summary
                   </div>
+                  <p className="body-text leading-relaxed">{ev.summary}</p>
                 </div>
+
+                {/* Why It Matters */}
+                {ev.liabilityImpact && (
+                  <div className="pt-5 border-t border-line">
+                    <div className="eyebrow flex items-center gap-1.5 mb-1.5">
+                      <Scale className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                      Why It Matters
+                    </div>
+                    <p className="body-text leading-relaxed">{ev.liabilityImpact}</p>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-3 pt-5 border-t border-line">
+                  <Button
+                    onClick={() => openPreviewForFile(ev.evidence[0] ?? "")}
+                    disabled={ev.evidence.length === 0}
+                    className="btn btn-primary gap-2 flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview All Evidence
+                  </Button>
+                  <Button
+                    onClick={() => openChatForFile(ev.evidence[0] ?? "")}
+                    disabled={ev.evidence.length === 0}
+                    className="btn btn-secondary gap-2 flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Bot className="w-4 h-4" strokeWidth={1.75} /> Chat With AI
+                  </Button>
+                </div>
+              </div>
+
+              {/* Footer Navigation */}
+              <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-line shrink-0">
+                <button
+                  onClick={() => setDrawerEventIndex((idx) => (idx === null ? null : Math.max(0, idx - 1)))}
+                  disabled={isFirst}
+                  className="btn btn-secondary gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" strokeWidth={1.75} /> Previous Event
+                </button>
+                <button
+                  onClick={() => setDrawerEventIndex((idx) => (idx === null ? null : Math.min(timelineEvents.length - 1, idx + 1)))}
+                  disabled={isLast}
+                  className="btn btn-secondary gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next Event <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
+                </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {/* ── Document Workspace — unified Preview + Insights modal ── */}
+      <DocumentWorkspaceModal
+        docs={showDocumentPreview ? activeSet : null}
+        noteContext={activeContext}
+        initialView={workspaceView}
+        position={setIndex + 1}
+        total={docSets.length}
+        onPrev={() => setSetIndex((i) => Math.max(0, i - 1))}
+        onNext={() => setSetIndex((i) => Math.min(docSets.length - 1, i + 1))}
+        onClose={() => { setShowDocumentPreview(false); setDocSets([]); setSetContexts([]); setSetIndex(0); }}
+        onDownload={() => {}}
+      />
     </div>
   );
 }

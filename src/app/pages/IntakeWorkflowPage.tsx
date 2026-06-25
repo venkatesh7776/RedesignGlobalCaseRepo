@@ -1,8 +1,9 @@
 import React, { useState, useRef } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import { CaseSnapshot } from "../components/CaseSnapshot";
-import { Send, Upload, CheckCircle, Circle, ArrowRight, Check, X, FileText, Copy, MoreVertical, Download, Eye, Search, ChevronLeft, ChevronDown, Mail, MessageSquare, AlertCircle, Bot, ZoomIn, ZoomOut, ChevronRight, Pencil, RefreshCw, Plus, Clock } from "lucide-react";
+import { Send, Upload, CheckCircle, Circle, ArrowRight, Check, X, FileText, Copy, Download, Eye, Search, ChevronLeft, ChevronDown, Mail, MessageSquare, AlertCircle, AlertTriangle, ListChecks, Bot, Pencil, RefreshCw, Plus, Clock, Info } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { DocActions, DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import { PipelineState, CaseDocument, classifyDocuments, detectMissingEvidence } from "../types/case";
 
 interface IntakeWorkflowPageProps {
@@ -117,7 +118,14 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   const data = { ...defaultCaseData, ...caseData };
 
-  const [accordionOpen, setAccordionOpen] = useState({ retainer: true, request: false, documents: false });
+  // Default expansion reflects the active blocker: open the Retainer while it is
+  // unsigned, otherwise focus the Documents once the case has files. Intake stays
+  // collapsed to a single-row summary by default.
+  const [accordionOpen, setAccordionOpen] = useState({
+    retainer: pipeline.retainerStatus !== "signed",
+    request: false,
+    documents: pipeline.retainerStatus === "signed" && pipeline.documents.length > 0,
+  });
   const toggleAccordion = (key: "retainer" | "request" | "documents") =>
     setAccordionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   const [documents, setDocuments] = useState(documentCategories);
@@ -162,19 +170,22 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const [agreementUploaded, setAgreementUploaded] = useState(false);
   const [showUploadAgreementModal, setShowUploadAgreementModal] = useState(false);
   const [showGenerateNewRetainerModal, setShowGenerateNewRetainerModal] = useState(false);
-  const [demoRetainerState, setDemoRetainerState] = useState<"sent" | "signed">("sent");
+  const [demoRetainerState, setDemoRetainerState] = useState<"sent" | "signed">(pipeline.retainerStatus === "signed" ? "signed" : "sent");
   const [demoIntakeState, setDemoIntakeState] = useState<"awaiting" | "received">("awaiting");
+  // Retainer versioning — each generated retainer is its own version, newest first.
+  type RetainerVersion = { id: number; status: "Awaiting Signature" | "Signed"; recipient: string; template: string; sentDate: string; signedDate?: string; signedDocName?: string; sentDocName?: string };
+  const [retainerVersions, setRetainerVersions] = useState<RetainerVersion[]>([]);
+  // Status filter for the multi-retainer view (header control). Single retainer keeps the demo toggle.
+  const [retainerFilter, setRetainerFilter] = useState<"all" | "Awaiting Signature" | "Signed">("all");
+  const [retainerModalMode, setRetainerModalMode] = useState<"initial" | "new-version">("initial");
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [retainerMessage, setRetainerMessage] = useState("");
   const [selectedTemplateName, setSelectedTemplateName] = useState("");
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
-  const [previewAiOpen, setPreviewAiOpen] = useState(false);
-  const [previewAiMessages, setPreviewAiMessages] = useState<Array<{ role: string; content: string }>>([]);
-  const [previewAiInput, setPreviewAiInput] = useState("");
-  const [aiPopupDoc, setAiPopupDoc] = useState<any>(null);
-  const [aiPopupMessages, setAiPopupMessages] = useState<Array<{ role: string; content: string }>>([]);
-  const [aiPopupInput, setAiPopupInput] = useState("");
+  // Which view the Document Workspace opens into: "preview" (80/20 doc + action rail)
+  // or "insights" (60/40 doc + AI panel).
+  const [workspaceView, setWorkspaceView] = useState<"preview" | "insights">("preview");
   const [editingDocName, setEditingDocName] = useState(false);
   const [editDocNameValue, setEditDocNameValue] = useState("");
 
@@ -203,7 +214,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const [viewingSubmissionId, setViewingSubmissionId] = useState<string | null>(null);
 
   // plaintiffActivityDetected is derived after sharedDocs — see below
-  const [documentsSubTab, setDocumentsSubTab] = useState<"retainer" | "intake">("retainer");
+  const [documentsSubTab, setDocumentsSubTab] = useState<"retainer" | "intake">("intake");
   const [documentSearch, setDocumentSearch] = useState("");
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
 
@@ -290,6 +301,24 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     ));
   };
 
+  // ── PROTOTYPE-ONLY: demo state toggle ──
+  // Lets presenters instantly flip a request between the "Sent" and
+  // "Response Received" states without completing the real intake flow.
+  // Uses mock frontend state only — not a production feature.
+  const handleSetDemoState = (id: string, state: "sent" | "received") => {
+    setIntakeRequests((prev) => {
+      const exists = prev.some((r) => r.id === id);
+      const base = exists ? prev : [buildNewRequest({ id })];
+      return base.map((r) =>
+        r.id === id
+          ? state === "received"
+            ? { ...r, status: "Completed", docsReceived: r.docsReceived ?? 8, missingDocs: r.missingDocs ?? 1 }
+            : { ...r, status: "Sent" }
+          : r
+      );
+    });
+  };
+
   const handleOpenResend = (id: string) => {
     setResendingId(id);
     setShowResendModal(true);
@@ -340,6 +369,18 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   };
 
   const handleOpenSendRetainerModal = () => {
+    setRetainerModalMode("initial");
+    setRetainerMessage(
+      `Hello ${data.plaintiff},\n\nPlease review and sign the attached retainer agreement to begin representation.\n\nThank you.`
+    );
+    setShowSendRetainerModal(true);
+  };
+
+  // Generate New Retainer → opens the same creation flow used during initial setup.
+  // Nothing is created until the attorney explicitly clicks "Send Retainer".
+  const handleGenerateNewRetainer = () => {
+    setRetainerModalMode("new-version");
+    setSelectedTemplate("");
     setRetainerMessage(
       `Hello ${data.plaintiff},\n\nPlease review and sign the attached retainer agreement to begin representation.\n\nThank you.`
     );
@@ -348,11 +389,34 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   const handleSendRetainer = () => {
     const template = retainerTemplates.find((t) => t.id === selectedTemplate);
-    if (template) {
-      setSelectedTemplateName(template.name);
+    const templateName = template ? template.name : (selectedTemplateName || "Personal Injury Retainer Agreement v1");
+    setSelectedTemplateName(templateName);
+    const recipient = retainerEmail || data.plaintiffEmail || data.plaintiff;
+
+    if (retainerModalMode === "new-version") {
+      // Preserve the existing signed retainer as version #1 and add a new
+      // "Awaiting Signature" version above it.
+      setRetainerVersions((prev) => {
+        const base: RetainerVersion[] = prev.length > 0 ? prev : [{
+          id: 1,
+          status: "Signed",
+          recipient: retainerEmail || data.plaintiffEmail || data.plaintiff,
+          template: selectedTemplateName || "Personal Injury Retainer Agreement v1",
+          sentDate: retainerSentDate || "Jun 9, 2026",
+          signedDate: retainerSignedDate || "Jun 11, 2026",
+          signedDocName: "Signed_PI_Retainer.pdf",
+          sentDocName: "PI_Retainer_Agreement.pdf",
+        }];
+        const nextId = Math.max(...base.map((r) => r.id)) + 1;
+        return [...base, { id: nextId, status: "Awaiting Signature", recipient, template: templateName, sentDate: "Jun 12, 2026", sentDocName: "PI_Retainer_Agreement.pdf" }];
+      });
+      setRetainerStatus("signed");
+    } else {
+      setRetainerStatus("sent");
+      setDemoRetainerState("sent");
+      setRetainerSentDate("Jun 9, 2026");
     }
-    setRetainerStatus("sent");
-    setRetainerSentDate("Jun 9, 2026");
+    setRetainerModalMode("initial");
     setShowSendRetainerModal(false);
   };
 
@@ -367,6 +431,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   const handleConfirmSigned = () => {
     setRetainerStatus("signed");
+    setDemoRetainerState("signed");
     setRetainerSignedDate("Jun 9, 2026");
     setAgreementUploaded(true);
     setShowMarkSignedModal(false);
@@ -374,6 +439,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   const handleAddLater = () => {
     setRetainerStatus("signed");
+    setDemoRetainerState("signed");
     setRetainerSignedDate("Jun 9, 2026");
     setAgreementUploaded(false);
     setShowMarkSignedModal(false);
@@ -387,46 +453,20 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     setRetainerSentDate("Jun 9, 2026");
   };
 
-  const handlePreviewDocument = (document: any) => {
+  // Preview and Insights open the same unified Document Workspace into different views:
+  // Preview = 80/20 document + action rail; Insights = 60/40 document + AI panel.
+  const openDocumentWorkspace = (document: any, view: "preview" | "insights" = "preview") => {
     setSelectedDocument(document);
-    setPreviewAiOpen(false);
-    setPreviewAiMessages([]);
-    setPreviewAiInput("");
+    setWorkspaceView(view);
     setShowDocumentPreview(true);
     setOpenActionMenu(null);
   };
+  const handlePreviewDocument = (document: any) => openDocumentWorkspace(document, "preview");
+  const handleOpenInsights = (document: any) => openDocumentWorkspace(document, "insights");
 
-  const handleOpenAiPopup = (document: any) => {
-    if (aiPopupDoc?.id === document.id) {
-      setAiPopupDoc(null);
-    } else {
-      setAiPopupDoc(document);
-      setAiPopupMessages([]);
-      setAiPopupInput("");
-    }
+  const handleDownloadDocument = (_document: any) => {
+    // Prototype: direct download is a no-op stand-in for the real file export.
     setOpenActionMenu(null);
-  };
-
-  const handleSendAiPopup = (text?: string) => {
-    const msg = text ?? aiPopupInput;
-    if (!msg.trim()) return;
-    setAiPopupMessages((prev) => [
-      ...prev,
-      { role: "user", content: msg },
-      { role: "assistant", content: "Based on this document, here is a simulated LECO analysis response. In production this would reflect the actual document content." },
-    ]);
-    setAiPopupInput("");
-  };
-
-  const handleSendPreviewAi = (text?: string) => {
-    const msg = text ?? previewAiInput;
-    if (!msg.trim()) return;
-    setPreviewAiMessages((prev) => [
-      ...prev,
-      { role: "user", content: msg },
-      { role: "assistant", content: "Based on this document, here is a simulated LECO analysis response. In production this would reflect the actual document content." },
-    ]);
-    setPreviewAiInput("");
   };
 
   // Shared uploaded documents (pipeline state)
@@ -534,24 +574,133 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   const requestedDocumentsCount = documents.filter((doc) => doc.enabled).length;
 
+  // ── Retainer versions (effective list drives the section + checklist) ──
+  const synthRetainer: RetainerVersion = {
+    id: 1,
+    status: demoRetainerState === "signed" ? "Signed" : "Awaiting Signature",
+    recipient: retainerEmail || data.plaintiffEmail || data.plaintiff,
+    template: selectedTemplateName || "Personal Injury Retainer Agreement v1",
+    sentDate: retainerSentDate || "Jun 9, 2026",
+    signedDate: retainerSignedDate || "Jun 11, 2026",
+    signedDocName: "Signed_PI_Retainer.pdf",
+    sentDocName: "PI_Retainer_Agreement.pdf",
+  };
+  const effectiveRetainers: RetainerVersion[] = retainerVersions.length > 0
+    ? retainerVersions
+    : retainerStatus !== "not-sent" ? [synthRetainer] : [];
+  const newestRetainer = effectiveRetainers.reduce<RetainerVersion | null>((a, b) => (a && a.id > b.id ? a : b), null);
+  // Header demo toggle reflects the newest retainer once explicit versions exist.
+  const headerDemoActive: "sent" | "signed" = retainerVersions.length > 0
+    ? (newestRetainer?.status === "Signed" ? "signed" : "sent")
+    : demoRetainerState;
+
+  // ── Collection status — derived entirely from real pipeline/intake state ──
+  const retainerSigned = effectiveRetainers.some((r) => r.status === "Signed");
+  const intakeResponseReceived = intakeRequests.some((r) => r.status === "Completed");
+  const documentsReceived = sharedDocs.length > 0;
+  const processingComplete = documentsReceived && sharedDocs.every((d) => d.status === "Processed");
+  const missingDocCount = missingEvidence.length;
+  const missingDocNames = missingEvidence.map((m) => m.title);
+
+  const collectionTasks = [retainerSigned, intakeResponseReceived, processingComplete];
+  const completeCount = collectionTasks.filter(Boolean).length;
+  const totalTasks = collectionTasks.length;
+
+  const canProceed = retainerSigned && documentsReceived && processingComplete;
+
+
+  // Sidebar task navigation: expand + scroll to the matching workspace section
+  const focusSection = (key: "retainer" | "request" | "documents") => {
+    setAccordionOpen((prev) => ({ ...prev, [key]: true }));
+    setTimeout(() => {
+      document.getElementById(`${key}-section`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  };
+
+  // Demo handlers — flip all dependent UI from the per-section header toggles
+  const applyDemoRetainer = (state: "sent" | "signed") => {
+    setDemoRetainerState(state);
+    setRetainerStatus(state === "signed" ? "signed" : "sent");
+    if (state === "signed" && !retainerSignedDate) setRetainerSignedDate("Jun 11, 2026");
+    // When explicit versions exist, flip the newest version's status.
+    setRetainerVersions((prev) => {
+      if (prev.length === 0) return prev;
+      const maxId = Math.max(...prev.map((r) => r.id));
+      return prev.map((r) => r.id === maxId
+        ? { ...r, status: state === "signed" ? "Signed" : "Awaiting Signature", signedDate: state === "signed" ? (r.signedDate || "Jun 12, 2026") : r.signedDate, signedDocName: state === "signed" ? (r.signedDocName || "Signed_PI_Retainer.pdf") : r.signedDocName }
+        : r);
+    });
+  };
+  const applyDemoIntake = (state: "sent" | "received") => {
+    setIntakeCreated(true);
+    setIntakeSent(true);
+    handleSetDemoState("REQ-001", state);
+  };
+
+  const intakeReqCount = intakeRequests[0]?.requestedDocs?.length ?? 0;
+  const docsTotal = sharedDocs.length + missingDocCount;
+
+  const collectionTaskList = [
+    {
+      key: "retainer" as const,
+      name: "Retainer",
+      Icon: retainerSigned ? CheckCircle : Clock,
+      iconColor: retainerSigned ? "text-brand" : "text-amber-600",
+      status: retainerSigned ? "Agreement signed" : retainerStatus === "not-sent" ? "Not yet sent" : "Awaiting signature",
+      statusColor: retainerSigned ? "text-deep" : "text-amber-700",
+      CtaIcon: retainerSigned ? Eye : Mail,
+      cta: retainerSigned ? "Preview agreement" : "Send reminder",
+      primary: !retainerSigned,
+    },
+    {
+      key: "request" as const,
+      name: "Intake request",
+      Icon: intakeResponseReceived || intakeSent ? CheckCircle : Circle,
+      iconColor: intakeResponseReceived || intakeSent ? "text-brand" : "text-[#9BDAEC]",
+      status: intakeResponseReceived ? "Response received" : intakeSent ? `Sent${intakeReqCount ? ` · ${intakeReqCount} requested` : ""}` : "Not yet sent",
+      statusColor: intakeResponseReceived || intakeSent ? "text-deep" : "text-[#5B6B78]",
+      CtaIcon: Eye,
+      cta: intakeResponseReceived ? "View submission" : "View request",
+      primary: false,
+    },
+    {
+      key: "documents" as const,
+      name: "Documents",
+      Icon: processingComplete ? CheckCircle : documentsReceived ? AlertTriangle : Circle,
+      iconColor: processingComplete ? "text-brand" : documentsReceived ? "text-amber-600" : "text-[#9BDAEC]",
+      status: !documentsReceived ? "Awaiting documents" : missingDocCount > 0 ? `${sharedDocs.length} processed · ${missingDocCount} missing` : `${sharedDocs.length} processed`,
+      statusColor: processingComplete ? "text-deep" : documentsReceived ? "text-amber-700" : "text-[#5B6B78]",
+      CtaIcon: ListChecks,
+      cta: missingDocCount > 0 ? "Check missing docs" : "Review documents",
+      primary: false,
+    },
+  ];
+
+  const blockedParts: string[] = [];
+  if (!retainerSigned) blockedParts.push("retainer unsigned");
+  if (!documentsReceived) blockedParts.push("no documents");
+  else if (missingDocCount > 0) blockedParts.push(`${missingDocCount} docs missing`);
+  else if (!processingComplete) blockedParts.push("processing incomplete");
+  const blockedSummary = blockedParts.length ? `Blocked: ${blockedParts.join(" · ")}` : "";
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-wash">
       {/* Context Header */}
-      <div className="sticky top-0 z-40 bg-white border-b border-gray-200">
+      <div className="sticky top-0 z-40 bg-white">
         <div className="max-w-[1400px] mx-auto px-8 py-4">
           <div className="flex items-center gap-4">
             {/* Back Navigation */}
             <button
               onClick={onBackToIntake}
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex items-center gap-2 text-sm text-deep hover:text-ink transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />
               Back to Case Intake
             </button>
 
             {/* Breadcrumb */}
-            <div className="text-sm text-gray-500">
-              Case Intake <span className="mx-2">›</span> <span className="text-gray-900 font-medium">{data.caseName}</span>
+            <div className="text-sm text-[#5B6B78] ml-auto">
+              Case Intake <span className="mx-2">›</span> <span className="text-ink font-medium">{data.caseName}</span>
             </div>
           </div>
         </div>
@@ -559,185 +708,356 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       <StageNavigator currentStage="Client Intake" onStageClick={onStageClick} />
 
-      <div className="max-w-[1400px] mx-auto p-8 space-y-6">
-        {/* Page Header */}
+      <div className="max-w-[1400px] mx-auto p-8 space-y-8">
+        {/* Page Header + Global Presenter Control */}
+        {/* SECTION 1 — Case Snapshot */}
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Client Intake & Document Collection</h1>
-          <p className="text-gray-600">Manage the retainer agreement, send the intake request, and collect all case documents from the client and attorney.</p>
+          <h1 className="text-[24px] font-semibold text-ink leading-tight tracking-tight mb-4">Stage 1 · Collection</h1>
+          <CaseSnapshot
+            caseName={data.caseName}
+            caseType={data.caseType}
+            caseSubType={(data as any).caseSubType}
+            plaintiff={data.plaintiff}
+            plaintiffEmail={data.plaintiffEmail}
+            plaintiffPhone={data.plaintiffPhone}
+            jurisdiction={data.jurisdiction}
+            caseId={data.caseId}
+            dateOfIncident={data.dateOfIncident}
+            summary={data.summary}
+          />
         </div>
 
-        <CaseSnapshot
-          caseName={data.caseName}
-          caseType={data.caseType}
-          caseSubType={(data as any).caseSubType}
-          plaintiff={data.plaintiff}
-          plaintiffEmail={data.plaintiffEmail}
-          plaintiffPhone={data.plaintiffPhone}
-          jurisdiction={data.jurisdiction}
-          caseId={data.caseId}
-          dateOfIncident={data.dateOfIncident}
-          summary={data.summary}
-        />
+        {/* SECTION 2 — Main Workspace */}
+        <div className="flex gap-6 items-start">
+          {/* ── LEFT SIDEBAR ── */}
+          <aside className="w-[320px] shrink-0 sticky top-[150px] space-y-4">
+            {/* Collection Checklist */}
+            <div className="lg-card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="card-title">Collection checklist</h3>
+                <span className={`pill ${completeCount === totalTasks ? "pill-complete" : "pill-progress"}`}>
+                  {completeCount} of {totalTasks}
+                </span>
+              </div>
 
-        {/* Accordion Sections */}
-        <div className="space-y-3">
+              <div className="space-y-3">
+                {collectionTaskList.map((t) => (
+                  <div key={t.key} className="border border-line rounded-xl p-4">
+                    <div className="flex items-start gap-2.5 mb-3">
+                      <t.Icon className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${t.iconColor}`} strokeWidth={1.75} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-ink leading-tight">{t.name}</div>
+                        <div className={`text-xs mt-0.5 ${t.statusColor}`}>{t.status}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => (t.onClick ? t.onClick() : focusSection(t.key))}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all bg-tint hover:bg-soft text-deep"
+                    >
+                      <t.CtaIcon className="w-4 h-4" strokeWidth={1.75} />
+                      {t.cta}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-line my-4" />
+
+              <button
+                onClick={canProceed ? onContinue : undefined}
+                disabled={!canProceed}
+                className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  canProceed
+                    ? "bg-brand hover:bg-deep text-white"
+                    : "bg-track text-[#8A98A3] cursor-not-allowed"
+                }`}
+              >
+                Proceed to Analysis
+                <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+              </button>
+              {!canProceed && blockedSummary && (
+                <p className="text-xs text-[#5B6B78] mt-2.5 text-center">{blockedSummary}</p>
+              )}
+            </div>
+          </aside>
+
+          {/* ── RIGHT WORKSPACE ── */}
+          <div className="flex-1 min-w-0 space-y-3">
 
           {/* ── Retainer ── */}
-          <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+          <div id="retainer-section" className="lg-card overflow-hidden scroll-mt-[150px]">
             {/* Accordion header */}
-            <div className="flex items-center justify-between px-6 py-5">
-              <button onClick={() => toggleAccordion("retainer")} className="flex-1 text-left">
-                <span className="text-base font-semibold text-gray-900">Retainer</span>
+            <div className="flex items-center justify-between gap-4 px-6 py-5">
+              <button
+                onClick={() => toggleAccordion("retainer")}
+                className="flex items-center gap-3 text-left min-w-0"
+              >
+                <span className="card-title">Retainer</span>
               </button>
               <div className="flex items-center gap-3 shrink-0">
-                {/* Demo state toggle — prototype only */}
-                {retainerStatus !== "not-sent" && (
+                {effectiveRetainers.length > 1 ? (
+                  /* Status filter — multiple retainers */
+                  <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
+                    {([["Awaiting Signature", "Awaiting Signature"], ["Signed", "Signed"], ["all", "All"]] as const).map(([val, label]) => (
+                      <button
+                        key={val}
+                        onClick={() => setRetainerFilter(val)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${retainerFilter === val ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : effectiveRetainers.length === 1 ? (
+                  /* Demo toggle — prototype only, single retainer */
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 font-medium">Demo</span>
-                    <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
-                      <button onClick={() => setDemoRetainerState("sent")} className={`px-3 py-1.5 rounded-md transition-all ${demoRetainerState === "sent" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}>
-                        Awaiting Signature
-                      </button>
-                      <button onClick={() => setDemoRetainerState("signed")} className={`px-3 py-1.5 rounded-md transition-all ${demoRetainerState === "signed" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}>
-                        Signed
-                      </button>
+                    <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
+                      {([["sent", "Awaiting Signature"], ["signed", "Signed"]] as const).map(([val, label]) => (
+                        <button
+                          key={val}
+                          onClick={() => applyDemoRetainer(val)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${headerDemoActive === val ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                )}
+                ) : null}
                 <button onClick={() => toggleAccordion("retainer")}>
-                  <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${accordionOpen.retainer ? "" : "-rotate-90"}`} />
+                  <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 ${accordionOpen.retainer ? "" : "-rotate-90"}`} strokeWidth={1.75} />
                 </button>
               </div>
             </div>
 
             {accordionOpen.retainer && (
-              <div className="border-t border-gray-100 p-6">
-              <div className="space-y-6">
-                {retainerStatus === "not-sent" ? (
-                  <div className="text-center py-10">
-                    <div className="inline-flex p-4 bg-gray-100 rounded-full mb-4">
-                      <FileText className="w-8 h-8 text-gray-400" />
+              <div className="border-t border-line">
+                {effectiveRetainers.length === 0 ? (
+                  /* ── EMPTY: no retainer sent ── */
+                  <div className="text-center py-10 px-6">
+                    <div className="inline-flex p-4 bg-tint rounded-full mb-4">
+                      <FileText className="w-8 h-8 text-[#5B6B78]" strokeWidth={1.75} />
                     </div>
-                    <h3 className="text-base font-semibold text-gray-900 mb-1">No Retainer Agreement Sent</h3>
-                    <p className="text-sm text-gray-500 mb-6">Send a retainer agreement to the plaintiff to begin the representation.</p>
+                    <h3 className="card-title mb-1">No Retainer Agreement Sent</h3>
+                    <p className="secondary-text mb-6">Send a retainer agreement to the plaintiff to begin the representation.</p>
                     <div className="flex items-center justify-center gap-3">
-                      <Button onClick={handleOpenSendRetainerModal} className="bg-cyan-500 hover:bg-cyan-600 text-white border-0 gap-2">
+                      <Button onClick={handleOpenSendRetainerModal} className="bg-brand hover:bg-deep text-white border-0 gap-2">
                         Send Retainer
                       </Button>
-                      <Button onClick={handleMarkAsSigned} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">
+                      <Button onClick={handleMarkAsSigned} className="bg-white border border-line text-ink hover:bg-wash">
                         Mark as Signed
                       </Button>
                     </div>
                   </div>
 
-                ) : demoRetainerState === "sent" ? (
-                  /* ── STATE 1: Awaiting Signature ── */
-                  <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="flex items-center gap-3 px-6 py-4 bg-cyan-50 border-b border-cyan-100">
-                      <div className="w-2 h-2 rounded-full bg-cyan-400" />
-                      <span className="text-sm font-semibold text-cyan-800">Retainer Sent — Awaiting Signature</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
-                      {[
-                        { label: "Status", value: "Sent" },
-                        { label: "Date Sent", value: retainerSentDate || "Jun 9, 2026" },
-                        { label: "Recipient", value: retainerEmail || data.plaintiffEmail || data.plaintiff },
-                        { label: "Template", value: selectedTemplateName || "Personal Injury Retainer Agreement v1" },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="px-5 py-4">
-                          <div className="text-xs text-gray-400 font-medium mb-1">{label}</div>
-                          <div className="text-sm font-semibold text-gray-900">{value}</div>
+                ) : effectiveRetainers.length === 1 ? (
+                  /* ── SINGLE retainer — compact, content directly in the section ── */
+                  (() => {
+                    const r = effectiveRetainers[0];
+                    const signed = r.status === "Signed";
+                    const fields = signed
+                      ? [
+                          { label: "Status", value: "Signed" },
+                          { label: "Signed Date", value: r.signedDate || "Jun 11, 2026" },
+                          { label: "Recipient", value: r.recipient },
+                          { label: "Template", value: r.template },
+                        ]
+                      : [
+                          { label: "Status", value: "Sent" },
+                          { label: "Date Sent", value: r.sentDate },
+                          { label: "Recipient", value: r.recipient },
+                          { label: "Template", value: r.template },
+                        ];
+                    const docName = signed
+                      ? (r.signedDocName || "Signed_PI_Retainer.pdf")
+                      : (r.sentDocName || "PI_Retainer_Agreement.pdf");
+                    const retainerDoc = { name: docName, source: "Retainer", date: signed ? (r.signedDate || "Jun 11, 2026") : r.sentDate, status: signed ? "Signed" : "Sent" };
+                    return (
+                      <>
+                      <div className="bg-offwhite p-4 space-y-3">
+                        {/* Box 1 — info grid */}
+                        <div className="bg-white border border-line rounded-xl overflow-hidden">
+                          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line">
+                            {fields.map(({ label, value }) => (
+                              <div key={label} className="px-5 py-3.5">
+                                <div className="eyebrow mb-1">{label}</div>
+                                <div className="text-sm font-semibold text-ink truncate">{value}</div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="px-6 py-4 border-b border-gray-100">
-                      <p className="text-sm text-gray-500">The retainer agreement has been sent to the client and is awaiting signature.</p>
-                    </div>
-
-                    <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50">
-                      <button onClick={handleOpenSendRetainerModal} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-1.5">
-                        <RefreshCw className="w-3.5 h-3.5" /> Resend
-                      </button>
-                      <button onClick={() => setShowUploadAgreementModal(true)} className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium hover:bg-cyan-700 transition-all flex items-center gap-1.5">
-                        <Upload className="w-3.5 h-3.5" /> Upload Agreement
-                      </button>
-                    </div>
-                  </div>
-
-                ) : (
-                  /* ── STATE 2: Signed ── */
-                  <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="flex items-center gap-3 px-6 py-4 bg-green-50 border-b border-green-100">
-                      <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
-                      <span className="text-sm font-semibold text-green-800">Retainer Signed</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
-                      {[
-                        { label: "Status", value: "Signed" },
-                        { label: "Signed Date", value: retainerSignedDate || "Jun 11, 2026" },
-                        { label: "Recipient", value: retainerEmail || data.plaintiffEmail || data.plaintiff },
-                        { label: "Template", value: selectedTemplateName || "Personal Injury Retainer Agreement v1" },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="px-5 py-4">
-                          <div className="text-xs text-gray-400 font-medium mb-1">{label}</div>
-                          <div className="text-sm font-semibold text-gray-900">{value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Signed document row */}
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-green-50 border border-green-200 rounded-lg flex items-center justify-center shrink-0">
-                          <FileText className="w-4 h-4 text-green-600" />
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-400 font-medium mb-0.5">Signed Document</div>
-                          <div className="text-sm font-semibold text-gray-900">Signed_PI_Retainer.pdf</div>
+                        {/* Box 2 — document (sent doc while awaiting, signed doc once signed) */}
+                        <div className="bg-white border border-line rounded-xl px-5 py-3.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 bg-tint border border-line rounded-lg flex items-center justify-center shrink-0">
+                              <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="eyebrow mb-0.5">{signed ? "Signed Document" : "Sent Document"}</div>
+                              <div className="mono-ref text-ink">{docName}</div>
+                            </div>
+                          </div>
+                          {signed && (
+                            <DocActions
+                              onPreview={() => handlePreviewDocument(retainerDoc)}
+                              onInsights={() => handleOpenInsights(retainerDoc)}
+                              onDownload={() => handleDownloadDocument(retainerDoc)}
+                            />
+                          )}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="px-6 py-4 border-b border-gray-100">
-                      <p className="text-sm text-gray-500">A signed retainer agreement has been received and attached to this case.</p>
-                    </div>
+                        {/* Bottom bar — actions on a white bar */}
+                        <div className="flex items-center justify-end gap-3 bg-white border-t border-line px-4 py-3">
+                          {signed ? (
+                            <button onClick={handleGenerateNewRetainer} className="px-4 py-2 bg-ink hover:bg-deep text-white rounded-lg text-sm font-medium transition-all flex items-center gap-1.5">
+                              <Plus className="w-3.5 h-3.5" strokeWidth={1.75} /> Generate New Retainer
+                            </button>
+                          ) : (
+                            <>
+                              <button onClick={handleOpenSendRetainerModal} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all flex items-center gap-1.5">
+                                <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend
+                              </button>
+                              <button onClick={() => setShowUploadAgreementModal(true)} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
+                                <Upload className="w-3.5 h-3.5" strokeWidth={1.75} /> Upload Agreement
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()
 
-                    <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50">
-                      <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-1.5">
-                        <Eye className="w-3.5 h-3.5" /> Preview
-                      </button>
-                      <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-1.5">
-                        <Download className="w-3.5 h-3.5" /> Download
-                      </button>
-                      <button onClick={() => setShowGenerateNewRetainerModal(true)} className="px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-all flex items-center gap-1.5">
-                        <Plus className="w-3.5 h-3.5" /> Generate New Retainer
-                      </button>
-                    </div>
-                  </div>
+                ) : (
+                  /* ── MULTIPLE retainers — each repeats the exact single-retainer card ── */
+                  (() => {
+                    const sorted = [...effectiveRetainers].sort((a, b) => b.id - a.id);
+                    const shown = retainerFilter === "all" ? sorted : sorted.filter((r) => r.status === retainerFilter);
+                    return (
+                      <div className="bg-wash p-4 space-y-4">
+                        {shown.length === 0 ? (
+                          <div className="text-center py-8 secondary-text">No retainers match this filter.</div>
+                        ) : (
+                          shown.map((r) => {
+                            const signed = r.status === "Signed";
+                            const fields = signed
+                              ? [
+                                  { label: "Status", value: "Signed" },
+                                  { label: "Signed Date", value: r.signedDate || "Jun 11, 2026" },
+                                  { label: "Recipient", value: r.recipient },
+                                  { label: "Template", value: r.template },
+                                ]
+                              : [
+                                  { label: "Status", value: "Awaiting Signature" },
+                                  { label: "Date Sent", value: r.sentDate },
+                                  { label: "Recipient", value: r.recipient },
+                                  { label: "Template", value: r.template },
+                                ];
+                            const docName = signed
+                              ? (r.signedDocName || "Signed_PI_Retainer.pdf")
+                              : (r.sentDocName || "PI_Retainer_Agreement.pdf");
+                            const retainerDoc = { name: docName, source: "Retainer", date: signed ? (r.signedDate || r.sentDate) : r.sentDate, status: r.status };
+                            return (
+                              <div key={r.id} className="border border-line rounded-xl overflow-hidden">
+                                <div className="bg-offwhite p-4 space-y-3">
+                                  {/* Box 1 — info grid */}
+                                  <div className="bg-white border border-line rounded-xl overflow-hidden">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line">
+                                      {fields.map(({ label, value }) => (
+                                        <div key={label} className="px-5 py-3.5">
+                                          <div className="eyebrow mb-1">{label}</div>
+                                          <div className="text-sm font-semibold text-ink truncate">{value}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Box 2 — document (sent doc while awaiting, signed doc once signed) */}
+                                  <div className="bg-white border border-line rounded-xl px-5 py-3.5 flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="w-8 h-8 bg-tint border border-line rounded-lg flex items-center justify-center shrink-0">
+                                        <FileText className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="eyebrow mb-0.5">{signed ? "Signed Document" : "Sent Document"}</div>
+                                        <div className="mono-ref text-ink">{docName}</div>
+                                      </div>
+                                    </div>
+                                    {signed && (
+                                      <DocActions
+                                        onPreview={() => handlePreviewDocument(retainerDoc)}
+                                        onInsights={() => handleOpenInsights(retainerDoc)}
+                                        onDownload={() => handleDownloadDocument(retainerDoc)}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Bottom bar — actions only while awaiting signature */}
+                                {!signed && (
+                                  <div className="flex items-center justify-end gap-3 bg-white border-t border-line px-4 py-3">
+                                    <button onClick={handleOpenSendRetainerModal} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all flex items-center gap-1.5">
+                                      <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend
+                                    </button>
+                                    <button onClick={() => setShowUploadAgreementModal(true)} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
+                                      <Upload className="w-3.5 h-3.5" strokeWidth={1.75} /> Upload Agreement
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+
+                        {/* Section-level action — not attached to any single card */}
+                        <div className="flex justify-end pt-1">
+                          <button onClick={handleGenerateNewRetainer} className="px-4 py-2 bg-ink hover:bg-deep text-white rounded-lg text-sm font-medium transition-all flex items-center gap-1.5">
+                            <Plus className="w-3.5 h-3.5" strokeWidth={1.75} /> Generate New Retainer
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
-              </div>
               </div>
             )}
           </div>
 
           {/* ── Intake Request ── */}
-          <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-5">
-              <button onClick={() => toggleAccordion("request")} className="flex-1 text-left">
-                <span className="text-base font-semibold text-gray-900">Intake Request</span>
+          <div id="request-section" className="lg-card overflow-hidden scroll-mt-[150px]">
+            <div className="flex items-center justify-between gap-4 px-6 py-5">
+              <button
+                onClick={() => toggleAccordion("request")}
+                className="flex items-center gap-3 text-left min-w-0"
+              >
+                <span className="card-title">Intake Request</span>
               </button>
               <div className="flex items-center gap-3 shrink-0">
-                {/* intentionally empty — demo state is now per-card */}
+                {/* Demo toggle — prototype only */}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
+                    {([["sent", "Sent"], ["received", "Response Received"]] as const).map(([val, label]) => {
+                      const active = val === "received" ? intakeResponseReceived : (intakeSent && !intakeResponseReceived);
+                      return (
+                        <button
+                          key={val}
+                          onClick={() => applyDemoIntake(val)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${active ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <button onClick={() => toggleAccordion("request")}>
-                  <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${accordionOpen.request ? "" : "-rotate-90"}`} />
+                  <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 ${accordionOpen.request ? "" : "-rotate-90"}`} strokeWidth={1.75} />
                 </button>
               </div>
             </div>
             {accordionOpen.request && (
-              <div className="border-t border-gray-100 p-6">
+              <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
                 {!intakeCreated ? (
                   <>
@@ -745,20 +1065,20 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <button
                         onClick={() => setShowIntakeModal(true)}
-                        className="bg-white border border-gray-200 rounded-xl p-8 hover:shadow-lg hover:border-cyan-300 transition-all group text-left"
+                        className="lg-card lg-card-i p-8 group text-left"
                       >
                         <div className="space-y-4">
-                          <div className="p-4 bg-cyan-50 rounded-xl inline-flex">
-                            <Send className="w-8 h-8 text-cyan-600" />
+                          <div className="p-4 bg-tint rounded-xl inline-flex">
+                            <Send className="w-6 h-6 text-deep" strokeWidth={1.75} />
                           </div>
                           <div>
-                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Create Intake Form</h3>
-                            <p className="text-sm text-gray-600 mb-4">
+                            <h3 className="card-title mb-2">Create Intake Form</h3>
+                            <p className="secondary-text mb-4">
                               Create a secure intake form that the plaintiff can use to upload documents.
                             </p>
-                            <div className="flex items-center gap-2 text-cyan-600 font-medium text-sm group-hover:gap-3 transition-all">
+                            <div className="flex items-center gap-2 text-deep font-medium text-sm group-hover:gap-3 transition-all">
                               Create Intake Form
-                              <ArrowRight className="w-4 h-4" />
+                              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                             </div>
                           </div>
                         </div>
@@ -766,23 +1086,23 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
                       <button
                         onClick={() => handleSimulateUpload("Attorney")}
-                        className="bg-white border border-gray-200 rounded-xl p-8 hover:shadow-lg hover:border-cyan-300 transition-all group text-left"
+                        className="lg-card lg-card-i p-8 group text-left"
                       >
                         <div className="space-y-4">
-                          <div className="p-4 bg-cyan-50 rounded-xl inline-flex">
-                            <Upload className="w-8 h-8 text-cyan-600" />
+                          <div className="p-4 bg-tint rounded-xl inline-flex">
+                            <Upload className="w-6 h-6 text-deep" strokeWidth={1.75} />
                           </div>
                           <div>
-                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Upload Existing Files</h3>
-                            <p className="text-sm text-gray-600 mb-4">
+                            <h3 className="card-title mb-2">Upload Existing Files</h3>
+                            <p className="secondary-text mb-4">
                               Upload documents already received outside LECO.
                             </p>
-                            <p className="text-xs text-gray-500 mb-3">
+                            <p className="text-xs text-[#5B6B78] mb-3">
                               Examples: Email attachments • Physical paperwork • Police reports • Hospital records
                             </p>
-                            <div className="flex items-center gap-2 text-cyan-600 font-medium text-sm group-hover:gap-3 transition-all">
+                            <div className="flex items-center gap-2 text-deep font-medium text-sm group-hover:gap-3 transition-all">
                               Upload Files
-                              <ArrowRight className="w-4 h-4" />
+                              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                             </div>
                           </div>
                         </div>
@@ -796,61 +1116,86 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         const isCompleted = req.status === "Completed";
                         const isSent = req.status === "Sent" || req.status === "Draft";
                         const statusColors: Record<string, string> = {
-                          Draft: "bg-gray-100 text-gray-600",
-                          Sent: "bg-cyan-50 text-cyan-700",
-                          Completed: "bg-green-50 text-green-700",
-                          Expired: "bg-red-50 text-red-700",
-                          Cancelled: "bg-gray-100 text-gray-500",
+                          Draft: "pill pill-neutral",
+                          Sent: "pill pill-progress",
+                          Completed: "pill pill-complete",
+                          Expired: "pill pill-risk",
+                          Cancelled: "pill pill-neutral",
                         };
 
                         return (
-                          <div key={req.id} className="border border-gray-200 rounded-xl overflow-hidden" onClick={() => intakeOverflowOpen && setIntakeOverflowOpen(null)}>
+                          <div key={req.id} className="bg-white border border-line rounded-xl overflow-hidden" onClick={() => intakeOverflowOpen && setIntakeOverflowOpen(null)}>
 
                             {/* Card header */}
-                            <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
+                            <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-line">
                               <div className="flex items-center gap-2.5">
-                                <span className="text-xs font-bold text-gray-500 font-mono">{req.id}</span>
-                                {req.version > 1 && <span className="text-xs text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono">v{req.version}</span>}
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${statusColors[req.status] ?? "bg-gray-100 text-gray-600"}`}>
-                                  {isCompleted ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                  {req.status}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {/* Per-card demo toggle for Sent cards */}
-                                {isSent && (
-                                  <button
-                                    onClick={() => handleMarkCompleted(req.id)}
-                                    className="text-xs text-gray-400 hover:text-gray-600 border border-dashed border-gray-300 px-2.5 py-1 rounded-lg transition-colors"
-                                  >
-                                    Demo: Mark Completed
-                                  </button>
+                                <span className="mono-ref font-bold">{req.id}</span>
+                                {req.version > 1 && <span className="text-xs text-[#5B6B78] bg-white border border-line px-1.5 py-0.5 rounded font-mono">v{req.version}</span>}
+                                {!isCompleted && (
+                                  <span className={`inline-flex items-center gap-1 ${statusColors[req.status] ?? "pill pill-neutral"}`}>
+                                    <Clock className="w-3 h-3" strokeWidth={1.75} />
+                                    {req.status}
+                                  </span>
                                 )}
-                                <span className="text-xs text-gray-400">{req.lastSent}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                {isCompleted ? (
+                                  <>
+                                    <span className={`inline-flex items-center gap-1 ${statusColors[req.status] ?? "pill pill-neutral"}`}>
+                                      <CheckCircle className="w-3 h-3" strokeWidth={1.75} />
+                                      {req.status}
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        // Redirect to the Documents → Case Evidence tab instead of opening the modal.
+                                        setDocumentsSubTab("intake");
+                                        setAccordionOpen((prev) => ({ ...prev, documents: true }));
+                                        setTimeout(() => {
+                                          document.getElementById("documents-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                        }, 50);
+                                      }}
+                                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-sm font-semibold transition-all"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> View Submission
+                                    </button>
+                                  </>
+                                ) : isSent ? (
+                                  <>
+                                    <span className="mono-ref">{req.lastSent}</span>
+                                    <button onClick={() => handleModifyRequest(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
+                                      <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} /> Modify Request
+                                    </button>
+                                    <button onClick={() => handleOpenResend(req.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
+                                      <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="mono-ref">{req.lastSent}</span>
+                                )}
                               </div>
                             </div>
 
                             {isSent ? (
                               /* ── SENT STATE ── */
                               <>
-                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
+                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line border-b border-line">
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Recipient</div>
-                                    <div className="text-sm font-semibold text-gray-900 truncate">{req.recipient}</div>
+                                    <div className="eyebrow mb-1">Recipient</div>
+                                    <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Delivery</div>
-                                    <div className="text-sm font-semibold text-gray-900 capitalize">{req.deliveryMethod}</div>
+                                    <div className="eyebrow mb-1">Delivery</div>
+                                    <div className="text-sm font-semibold text-ink capitalize">{req.deliveryMethod}</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Documents Requested</div>
-                                    <div className="text-sm font-semibold text-gray-900">{req.requestedDocs.length}</div>
+                                    <div className="eyebrow mb-1">Documents Requested</div>
+                                    <div className="text-sm font-semibold text-ink">{req.requestedDocs.length}</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Documents</div>
+                                    <div className="eyebrow mb-1">Documents</div>
                                     <div className="space-y-0.5">
-                                      {req.requestedDocs.slice(0, 3).map((d) => <div key={d} className="text-xs text-gray-600 truncate">• {d}</div>)}
-                                      {req.requestedDocs.length > 3 && <div className="text-xs text-gray-400">+{req.requestedDocs.length - 3} more</div>}
+                                      {req.requestedDocs.slice(0, 3).map((d) => <div key={d} className="text-xs text-[#5B6B78] truncate">• {d}</div>)}
+                                      {req.requestedDocs.length > 3 && <div className="text-xs text-[#5B6B78]">+{req.requestedDocs.length - 3} more</div>}
                                     </div>
                                   </div>
                                 </div>
@@ -859,66 +1204,27 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                     Last modified {req.lastModified}
                                   </div>
                                 )}
-                                <div className="flex items-center justify-between px-5 py-3.5 bg-white">
-                                  <div className="flex items-center gap-2">
-                                    <button onClick={() => handleModifyRequest(req.id)} className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">
-                                      <Pencil className="w-3.5 h-3.5" /> Modify Request
-                                    </button>
-                                    <button onClick={() => handleOpenResend(req.id)} className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">
-                                      <RefreshCw className="w-3.5 h-3.5" /> Resend
-                                    </button>
-                                  </div>
-                                  <div className="relative">
-                                    <button onClick={(e) => { e.stopPropagation(); setIntakeOverflowOpen(intakeOverflowOpen === req.id ? null : req.id); }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                                      <MoreVertical className="w-4 h-4 text-gray-500" />
-                                    </button>
-                                    {intakeOverflowOpen === req.id && (
-                                      <div className="absolute right-0 bottom-10 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
-                                        <button onClick={() => { handleModifyRequest(req.id); setIntakeOverflowOpen(null); }} className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                          <Pencil className="w-3.5 h-3.5 text-gray-400" /> Update Recipient
-                                        </button>
-                                        <button onClick={() => setIntakeOverflowOpen(null)} className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                          <FileText className="w-3.5 h-3.5 text-gray-400" /> View Requested Documents
-                                        </button>
-                                        <button onClick={() => setIntakeOverflowOpen(null)} className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                          <Clock className="w-3.5 h-3.5 text-gray-400" /> View Activity Log
-                                        </button>
-                                        <button onClick={() => { setIntakeRequests((prev) => prev.map((r) => r.id === req.id ? { ...r, status: "Cancelled" as any } : r)); setIntakeOverflowOpen(null); }} className="w-full px-4 py-2.5 text-sm text-left text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-gray-100">
-                                          <X className="w-3.5 h-3.5" /> Cancel Request
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
                               </>
                             ) : (
                               /* ── COMPLETED STATE ── */
                               <>
-                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
+                                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-line border-b border-line">
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Status</div>
-                                    <div className="text-sm font-semibold text-gray-900">Completed</div>
+                                    <div className="eyebrow mb-1">Status</div>
+                                    <div className="text-sm font-semibold text-ink">Completed</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Recipient</div>
-                                    <div className="text-sm font-semibold text-gray-900 truncate">{req.recipient}</div>
+                                    <div className="eyebrow mb-1">Recipient</div>
+                                    <div className="text-sm font-semibold text-ink truncate">{req.recipient}</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Documents Received</div>
-                                    <div className="text-2xl font-bold text-gray-900">{req.docsReceived ?? 8}</div>
+                                    <div className="eyebrow mb-1">Documents Received</div>
+                                    <div className="kpi-value">{req.docsReceived ?? 8}</div>
                                   </div>
                                   <div className="px-5 py-4">
-                                    <div className="text-xs text-gray-400 font-medium mb-1">Missing Documents</div>
-                                    <div className="text-2xl font-bold text-orange-500">{req.missingDocs ?? 1}</div>
+                                    <div className="eyebrow mb-1">Missing Documents</div>
+                                    <div className="kpi-value text-amber-600">{req.missingDocs ?? 1}</div>
                                   </div>
-                                </div>
-                                <div className="flex items-center justify-between px-5 py-3.5 bg-white">
-                                  <button onClick={handleOpenAdditionalRequest} className="text-sm font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 transition-colors">
-                                    <Plus className="w-3.5 h-3.5" /> Create Additional Request
-                                  </button>
-                                  <button onClick={() => { setViewingSubmissionId(req.id); setShowViewSubmissionModal(true); }} className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-semibold transition-all">
-                                    <Eye className="w-3.5 h-3.5" /> View Submission
-                                  </button>
                                 </div>
                               </>
                             )}
@@ -927,17 +1233,40 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       })}
                     </div>
 
+                    {/* In the response-received state: Create Additional Request (left) + Upload (right), equal halves. */}
+                    <div className={`grid gap-6 items-start ${intakeResponseReceived ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
+                    {intakeResponseReceived && (() => {
+                      const disableAdditional = intakeRequests.some((r) => r.id !== "REQ-001");
+                      return (
+                        <div className="lg-card p-6">
+                          <h3 className="card-title mb-2">Create Additional Request</h3>
+                          <p className="secondary-text mb-4">
+                            Send another document request to the plaintiff for additional records.
+                          </p>
+                          <button
+                            onClick={handleOpenAdditionalRequest}
+                            disabled={disableAdditional}
+                            title={disableAdditional ? "An additional request has already been created" : undefined}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${disableAdditional ? "bg-white border border-line text-gray-300 cursor-not-allowed" : "bg-white border border-line text-deep hover:bg-wash"}`}
+                          >
+                            <Plus className="w-4 h-4" strokeWidth={1.75} />
+                            Create Additional Request
+                          </button>
+                        </div>
+                      );
+                    })()}
+
                     {/* Attorney Upload Section */}
-                    <div className="bg-white border border-gray-200 rounded-xl p-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Upload Existing Files</h3>
-                      <p className="text-sm text-gray-600 mb-4">
+                    <div className="lg-card p-6">
+                      <h3 className="card-title mb-2">Upload Existing Files</h3>
+                      <p className="secondary-text mb-4">
                         Add documents already received outside the LECO intake process.
                       </p>
 
                       {showUploadSuccess && (
                         <div className="mb-4 bg-green-50 border border-green-200 rounded-xl p-4">
                           <div className="flex items-start gap-3">
-                            <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+                            <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" strokeWidth={1.75} />
                             <div className="flex-1">
                               <p className="text-sm font-semibold text-green-800 mb-1">
                                 {uploadedFileNames.length} file{uploadedFileNames.length > 1 ? "s" : ""} uploaded successfully
@@ -958,7 +1287,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                               onClick={() => setShowUploadSuccess(false)}
                               className="text-green-400 hover:text-green-600 transition-colors"
                             >
-                              <X className="w-4 h-4" />
+                              <X className="w-4 h-4" strokeWidth={1.75} />
                             </button>
                           </div>
                         </div>
@@ -973,11 +1302,12 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       />
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 px-4 py-2 bg-cyan-50 border border-cyan-200 text-cyan-700 rounded-lg text-sm font-medium hover:bg-cyan-100 transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-wash transition-all"
                       >
-                        <Upload className="w-4 h-4" />
+                        <Upload className="w-4 h-4" strokeWidth={1.75} />
                         Upload Files
                       </button>
+                    </div>
                     </div>
                   </>
                 )}
@@ -987,126 +1317,123 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
           </div>
 
           {/* ── Documents ── */}
-          <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+          <div id="documents-section" className="lg-card overflow-hidden scroll-mt-[150px]">
             <button
               onClick={() => toggleAccordion("documents")}
-              className="w-full flex items-center justify-between px-6 py-5 hover:bg-gray-50 transition-colors text-left"
+              className="w-full flex items-center justify-between px-6 py-5 hover:bg-wash transition-colors text-left"
             >
-              <span className="text-base font-semibold text-gray-900">Documents</span>
-              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${accordionOpen.documents ? "" : "-rotate-90"}`} />
+              <div className="flex items-center gap-3">
+                <span className="card-title">Documents</span>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 shrink-0 ${accordionOpen.documents ? "" : "-rotate-90"}`} strokeWidth={1.75} />
             </button>
             {accordionOpen.documents && (
-              <div className="border-t border-gray-100 p-6">
+              <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
+                {/* MISSING DOCUMENTS BLOCK */}
+                {documentsReceived && missingDocCount > 0 && (
+                  <div className="rounded-xl p-5" style={{ background: "#FAEEDA", border: "1px solid #FAC775" }}>
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#854F0B" }} strokeWidth={1.75} />
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-semibold mb-1" style={{ color: "#854F0B" }}>
+                          {missingDocCount} Document{missingDocCount === 1 ? "" : "s"} Still Missing
+                        </h3>
+                        <ul className="space-y-0.5 mb-4">
+                          {missingDocNames.map((name) => (
+                            <li key={name} className="text-sm" style={{ color: "#854F0B" }}>• {name}</li>
+                          ))}
+                        </ul>
+                        <button
+                          onClick={openMissingRequestModal}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
+                          style={{ background: "#B45309" }}
+                        >
+                          <Send className="w-3.5 h-3.5" strokeWidth={1.75} /> Request All Missing
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Documents Sub-Tabs */}
-                <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-                  <div className="flex border-b border-gray-200">
-                    <button
-                      onClick={() => setDocumentsSubTab("retainer")}
-                      className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
-                        documentsSubTab === "retainer"
-                          ? "bg-cyan-50 text-cyan-600 border-b-2 border-cyan-600"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                      }`}
-                    >
-                      Retainer Documents
-                    </button>
-                    <button
-                      onClick={() => setDocumentsSubTab("intake")}
-                      className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
-                        documentsSubTab === "intake"
-                          ? "bg-cyan-50 text-cyan-600 border-b-2 border-cyan-600"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                      }`}
-                    >
-                      Case Evidence
-                    </button>
+                <div>
+                  <div className="flex items-center gap-1 mb-4">
+                    {([["intake", "Case evidence"], ["retainer", "Retainer documents"]] as const).map(([val, label]) => (
+                      <button
+                        key={val}
+                        onClick={() => setDocumentsSubTab(val)}
+                        className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          documentsSubTab === val
+                            ? "bg-tint text-deep"
+                            : "text-[#5B6B78] hover:text-ink hover:bg-wash"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
 
-                  <div className="p-6">
+                  <div>
                     {documentsSubTab === "retainer" ? (
                       retainerStatus !== "signed" ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
-                          <FileText className="w-8 h-8 text-gray-200 mb-3" />
-                          <p className="text-sm text-gray-400">No retainer documents yet.</p>
-                          <p className="text-xs text-gray-300 mt-1">Send and sign a retainer agreement to see documents here.</p>
+                          <FileText className="w-8 h-8 text-[#9BDAEC] mb-3" strokeWidth={1.75} />
+                          <p className="text-sm text-[#5B6B78]">No retainer documents yet.</p>
+                          <p className="text-xs text-[#5B6B78] mt-1">Send and sign a retainer agreement to see documents here.</p>
                         </div>
                       ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr className="border-b border-gray-200">
-                              <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">
+                          <thead className="bg-wash">
+                            <tr className="border-b border-line">
+                              <th className="text-left py-3 px-4 eyebrow">
                                 Document Name
                               </th>
-                              <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">
+                              <th className="text-left py-3 px-4 eyebrow">
                                 Status
                               </th>
-                              <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">
+                              <th className="text-left py-3 px-4 eyebrow">
                                 Date
                               </th>
-                              <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">
+                              <th className="text-right py-3 px-4 eyebrow">
                                 Actions
                               </th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-200 bg-white">
-                            {allRetainerDocuments.map((doc, index) => (
+                          <tbody className="divide-y divide-line bg-white">
+                            {allRetainerDocuments.map((doc, index) => {
+                              return (
+                              <React.Fragment key={index}>
                               <tr
-                                key={index}
                                 onClick={() => handlePreviewDocument(doc)}
-                                className="hover:bg-gray-50 cursor-pointer"
+                                className="cursor-pointer hover:bg-wash"
                               >
-                                <td className="py-3 px-4 text-sm text-gray-900 font-mono">{doc.name}</td>
+                                <td className="py-3 px-4 mono-ref text-ink">{doc.name}</td>
                                 <td className="py-3 px-4">
                                   <span
-                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    className={`pill ${
                                       doc.status === "Signed"
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-cyan-100 text-cyan-700"
+                                        ? "pill-complete"
+                                        : "pill-progress"
                                     }`}
                                   >
                                     {doc.status}
                                   </span>
                                 </td>
-                                <td className="py-3 px-4 text-sm text-gray-600">{doc.date}</td>
+                                <td className="py-3 px-4 text-sm text-[#5B6B78]">{doc.date}</td>
                                 <td className="py-3 px-4 text-right">
-                                  <div className="relative inline-block">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenActionMenu(openActionMenu === doc.name ? null : doc.name);
-                                      }}
-                                      className="p-1 hover:bg-gray-200 rounded transition-colors"
-                                    >
-                                      <MoreVertical className="w-4 h-4 text-gray-600" />
-                                    </button>
-                                    {openActionMenu === doc.name && (
-                                      <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePreviewDocument(doc);
-                                          }}
-                                          className="w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                                        >
-                                          <Eye className="w-4 h-4" />
-                                          Preview
-                                        </button>
-                                        <button className="w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                          <Download className="w-4 h-4" />
-                                          Download
-                                        </button>
-                                        <button className="w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                          <Info className="w-4 h-4" />
-                                          View Details
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
+                                  <DocActions
+                                    size="sm"
+                                    onPreview={() => handlePreviewDocument(doc)}
+                                    onInsights={() => handleOpenInsights(doc)}
+                                    onDownload={() => handleDownloadDocument(doc)}
+                                  />
                                 </td>
                               </tr>
-                            ))}
+                              </React.Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -1115,12 +1442,12 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       <div className="space-y-4">
                         {sharedDocs.length === 0 ? (
                           <div className="flex flex-col items-center justify-center py-14 text-center">
-                            <Upload className="w-8 h-8 text-gray-200 mb-3" />
-                            <p className="text-sm font-medium text-gray-500 mb-1">No evidence has been received yet.</p>
-                            <p className="text-xs text-gray-400 mb-4">Upload documents manually or wait for the plaintiff to complete the intake request.</p>
+                            <Upload className="w-8 h-8 text-[#9BDAEC] mb-3" strokeWidth={1.75} />
+                            <p className="text-sm font-medium text-ink mb-1">No evidence has been received yet.</p>
+                            <p className="text-xs text-[#5B6B78] mb-4">Upload documents manually or wait for the plaintiff to complete the intake request.</p>
                             <button
                               onClick={() => fileInputRef.current?.click()}
-                              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg text-sm font-medium transition-colors"
+                              className="px-4 py-2 bg-brand hover:bg-deep text-white rounded-lg text-sm font-medium transition-colors"
                             >
                               Upload Documents
                             </button>
@@ -1128,160 +1455,70 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         ) : (
                           <>
                             {/* Classification Summary Bar */}
-                            <div className="flex items-center justify-between gap-4 bg-green-50 border border-green-200 rounded-xl px-5 py-3">
+                            <div className="flex items-center justify-between gap-4 bg-tint border border-[#9BDAEC] rounded-xl px-5 py-3">
                               <div className="flex items-center gap-2">
-                                <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-                                <span className="text-sm font-semibold text-green-800">Document Processing Complete</span>
+                                <CheckCircle className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                                <span className="text-sm font-semibold text-deep">Document Processing Complete</span>
                               </div>
                               <div className="flex items-center gap-6 text-xs">
                                 <div className="text-center">
-                                  <div className="font-bold text-gray-900">{sharedDocs.length}</div>
-                                  <div className="text-gray-500">Processed</div>
+                                  <div className="font-bold text-ink">{sharedDocs.length}</div>
+                                  <div className="text-[#5B6B78]">Processed</div>
                                 </div>
                                 <div className="text-center">
-                                  <div className="font-bold text-gray-900">{classifiedCount}</div>
-                                  <div className="text-gray-500">Organized</div>
+                                  <div className="font-bold text-ink">{classifiedCount}</div>
+                                  <div className="text-[#5B6B78]">Organized</div>
                                 </div>
                                 <div className="text-center">
-                                  <div className="font-bold text-gray-900">{sharedDocs.length - classifiedCount}</div>
-                                  <div className="text-gray-500">Review</div>
+                                  <div className="font-bold text-ink">{sharedDocs.length - classifiedCount}</div>
+                                  <div className="text-[#5B6B78]">Review</div>
                                 </div>
-                                <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-lg font-semibold">Ready For Analysis</span>
+                                <span className="pill pill-neutral">Ready For Analysis</span>
                               </div>
                             </div>
 
                             {/* Categorized document sections */}
                             {classifiedCategories.map((category) => (
-                              <div key={category.name} className="border border-gray-200 rounded-xl overflow-hidden">
+                              <div key={category.name} className="border border-line rounded-xl overflow-hidden">
                                 <button
                                   onClick={() => toggleCategory(category.name)}
-                                  className="w-full flex items-center justify-between px-5 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                                  className="w-full flex items-center justify-between px-5 py-3 bg-wash hover:bg-tint transition-colors text-left"
                                 >
                                   <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold text-gray-800">{category.name}</span>
-                                    <span className="text-xs font-medium text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">{category.docs.length}</span>
+                                    <span className="text-sm font-semibold text-ink">{category.name}</span>
+                                    <span className="text-xs font-medium text-[#5B6B78] bg-white border border-line px-2 py-0.5 rounded-full">{category.docs.length}</span>
                                   </div>
-                                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isCategoryExpanded(category.name) ? "" : "-rotate-90"}`} />
+                                  <ChevronDown className={`w-4 h-4 text-[#5B6B78] transition-transform ${isCategoryExpanded(category.name) ? "" : "-rotate-90"}`} strokeWidth={1.75} />
                                 </button>
                                 {isCategoryExpanded(category.name) && (
                                   <table className="w-full">
-                                    <thead className="bg-white border-b border-gray-100">
+                                    <thead className="bg-white border-b border-line">
                                       <tr>
-                                        <th className="text-left px-5 py-2.5 text-xs font-medium text-gray-400 uppercase">File Name</th>
-                                        <th className="text-left px-5 py-2.5 text-xs font-medium text-gray-400 uppercase">Source</th>
-                                        <th className="text-left px-5 py-2.5 text-xs font-medium text-gray-400 uppercase">Date</th>
-                                        <th className="text-right px-5 py-2.5 text-xs font-medium text-gray-400 uppercase">Actions</th>
+                                        <th className="text-left px-5 py-2.5 eyebrow">File Name</th>
+                                        <th className="text-left px-5 py-2.5 eyebrow">Source</th>
+                                        <th className="text-left px-5 py-2.5 eyebrow">Date</th>
+                                        <th className="text-right px-5 py-2.5 eyebrow">Actions</th>
                                       </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                    <tbody className="divide-y divide-line bg-white">
                                       {category.docs.map((doc) => {
-                                        const isAiActive = aiPopupDoc?.id === doc.id;
-                                        const isOtherActive = aiPopupDoc && !isAiActive;
                                         return (
-                                          <React.Fragment key={doc.id}>
                                           <tr
-                                            className={`transition-all ${isAiActive ? "bg-purple-50 ring-1 ring-inset ring-purple-200" : isOtherActive ? "opacity-40 pointer-events-none" : "hover:bg-gray-50"}`}
+                                            key={doc.id}
+                                            className="transition-all hover:bg-wash"
                                           >
-                                            <td className="px-5 py-3 text-sm text-gray-900 font-mono">{doc.name}</td>
-                                            <td className="px-5 py-3 text-sm text-gray-500">{doc.source}</td>
-                                            <td className="px-5 py-3 text-sm text-gray-500">{doc.date}</td>
+                                            <td className="px-5 py-3 mono-ref text-ink">{doc.name}</td>
+                                            <td className="px-5 py-3 text-sm text-[#5B6B78]">{doc.source}</td>
+                                            <td className="px-5 py-3 text-sm text-[#5B6B78]">{doc.date}</td>
                                             <td className="px-5 py-3 text-right">
-                                              <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                  onClick={() => handlePreviewDocument(doc)}
-                                                  className="flex items-center gap-1 text-xs font-medium text-cyan-600 hover:text-cyan-700 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-cyan-50"
-                                                >
-                                                  <Eye className="w-3.5 h-3.5" /> Preview
-                                                </button>
-                                                <button
-                                                  onClick={() => handleOpenAiPopup(doc)}
-                                                  className={`flex items-center gap-1 text-xs font-medium transition-colors px-2.5 py-1.5 rounded-lg ${isAiActive ? "bg-purple-100 text-purple-700" : "text-purple-600 hover:text-purple-700 hover:bg-purple-50"}`}
-                                                >
-                                                  <Bot className="w-3.5 h-3.5" /> Chat With AI
-                                                </button>
-                                                <div className="relative">
-                                                  <button
-                                                    onClick={(e) => { e.stopPropagation(); setOpenActionMenu(openActionMenu === doc.id ? null : doc.id); }}
-                                                    className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                                                  >
-                                                    <MoreVertical className="w-3.5 h-3.5 text-gray-500" />
-                                                  </button>
-                                                  {openActionMenu === doc.id && (
-                                                    <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
-                                                      <button className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                                        <Pencil className="w-3.5 h-3.5 text-gray-400" /> Edit Document
-                                                      </button>
-                                                      <button className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                                                        <Download className="w-3.5 h-3.5 text-gray-400" /> Download
-                                                      </button>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
+                                              <DocActions
+                                                size="sm"
+                                                onPreview={() => handlePreviewDocument(doc)}
+                                                onInsights={() => handleOpenInsights(doc)}
+                                                onDownload={() => handleDownloadDocument(doc)}
+                                              />
                                             </td>
                                           </tr>
-                                          {isAiActive && (
-                                            <tr key={`${doc.id}-ai`}>
-                                              <td colSpan={4} className="px-5 pb-4">
-                                                <div className="bg-white border border-purple-200 rounded-xl overflow-hidden shadow-sm">
-                                                  {/* AI Panel Header */}
-                                                  <div className="flex items-center justify-between px-4 py-3 bg-purple-50 border-b border-purple-100">
-                                                    <div className="flex items-center gap-2">
-                                                      <div className="w-2 h-2 rounded-full bg-purple-500" />
-                                                      <span className="text-sm font-semibold text-purple-900">Chat With AI</span>
-                                                      <span className="text-xs text-purple-500 font-mono">· {doc.name}</span>
-                                                    </div>
-                                                    <button onClick={() => setAiPopupDoc(null)} className="p-1 hover:bg-purple-100 rounded-lg transition-colors">
-                                                      <X className="w-3.5 h-3.5 text-purple-400" />
-                                                    </button>
-                                                  </div>
-
-                                                  {/* Messages */}
-                                                  <div className="p-4 space-y-2 max-h-64 overflow-auto">
-                                                    {aiPopupMessages.length === 0 ? (
-                                                      <div>
-                                                        <p className="text-xs text-gray-400 mb-2">Try asking:</p>
-                                                        <div className="flex flex-wrap gap-2">
-                                                          {["Summarize this document", "What injuries are mentioned?", "Create a treatment timeline", "Does this support liability?", "Identify key findings", "What should I review first?"].map((p) => (
-                                                            <button key={p} onClick={() => handleSendAiPopup(p)} className="text-xs text-gray-700 bg-gray-50 hover:bg-purple-50 hover:text-purple-700 border border-gray-200 hover:border-purple-200 rounded-lg px-3 py-1.5 transition-colors">
-                                                              {p}
-                                                            </button>
-                                                          ))}
-                                                        </div>
-                                                      </div>
-                                                    ) : (
-                                                      aiPopupMessages.map((msg, i) => (
-                                                        <div key={i} className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                                                          <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed ${msg.role === "user" ? "bg-purple-500 text-white" : "bg-gray-100 text-gray-900"}`}>
-                                                            {msg.content}
-                                                          </div>
-                                                        </div>
-                                                      ))
-                                                    )}
-                                                  </div>
-
-                                                  {/* Input */}
-                                                  <div className="border-t border-gray-100 px-4 py-3">
-                                                    <div className="flex gap-2">
-                                                      <input
-                                                        type="text"
-                                                        value={aiPopupInput}
-                                                        onChange={(e) => setAiPopupInput(e.target.value)}
-                                                        onKeyDown={(e) => e.key === "Enter" && handleSendAiPopup()}
-                                                        placeholder="Ask anything about this document..."
-                                                        autoFocus
-                                                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:border-purple-400 transition-colors"
-                                                      />
-                                                      <button onClick={() => handleSendAiPopup()} className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors">
-                                                        <Send className="w-4 h-4" />
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                          </React.Fragment>
                                         );
                                       })}
                                     </tbody>
@@ -1296,93 +1533,42 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   </div>
                 </div>
 
-                {/* Missing Evidence Analysis — only in Case Evidence sub-tab */}
-                {documentsSubTab === "intake" && sharedDocs.length > 0 && (
-                  <>
-                    {/* Section 1 — Missing Evidence Cards */}
-                    <div className="bg-white border border-gray-200 rounded-2xl p-6">
-                      <h2 className="text-lg font-semibold text-gray-900 mb-1">Missing Evidence Analysis</h2>
-                      <p className="text-sm text-gray-500 mb-5">Evidence gaps identified during document processing that may impact case analysis.</p>
-
-                      {missingEvidence.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-8 text-center">
-                          <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-3" />
-                          <p className="text-sm font-semibold text-gray-700 mb-1">No Missing Evidence Identified</p>
-                          <p className="text-xs text-gray-400">All expected evidence has been received and processed.</p>
-                          <span className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 text-xs font-medium rounded-lg border border-green-200">
-                            <CheckCircle className="w-3.5 h-3.5" /> Evidence Collection Complete
-                          </span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-                            {missingEvidence.map((item, i) => (
-                              <div key={i} className="border border-gray-200 rounded-xl p-5">
-                                <div className="flex items-start gap-3 mb-4">
-                                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
-                                  <div>
-                                    <h4 className="text-sm font-semibold text-gray-900 mb-1.5">{item.title}</h4>
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700 border border-orange-100">
-                                      Missing
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="space-y-2">
-                                  <div className="text-xs text-gray-500">
-                                    <span className="font-medium text-gray-700">Expected: </span>
-                                    <span className="font-mono">{item.expected}</span>
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    <span className="font-medium text-gray-700">Reason: </span>
-                                    {item.reason}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="flex justify-end pt-4 border-t border-gray-100">
-                            <Button onClick={openMissingRequestModal} className="bg-cyan-500 hover:bg-cyan-600 text-white border-0">
-                              Send Missing Document Request
-                            </Button>
-                          </div>
-                        </>
-                      )}
+                {/* Evidence completeness confirmation (gaps are surfaced by the alert above) */}
+                {documentsSubTab === "intake" && sharedDocs.length > 0 && missingEvidence.length === 0 && (
+                  <div className="lg-card p-6">
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-3" strokeWidth={1.75} />
+                      <p className="text-sm font-semibold text-ink mb-1">No Missing Evidence Identified</p>
+                      <p className="text-xs text-[#5B6B78]">All expected evidence has been received and processed.</p>
+                      <span className="mt-3 pill pill-complete">
+                        <CheckCircle className="w-3.5 h-3.5" strokeWidth={1.75} /> Evidence Collection Complete
+                      </span>
                     </div>
-                  </>
+                  </div>
                 )}
-
-                {/* Bottom CTA */}
-                <div className="flex justify-end pt-4">
-                  <Button
-                    onClick={onContinue}
-                    className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0 gap-2"
-                  >
-                    Proceed to Analysis
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </div>
               </div>
               </div>
             )}
           </div>
 
-        </div>{/* end accordion space-y-3 */}
-      </div>
+          </div>{/* end right workspace */}
+        </div>{/* end section 2 — main workspace */}
+      </div>{/* end page container */}
 
       {/* Intake Form Modal */}
       {showIntakeModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="section-header">
                   {intakeModalMode === "modify" ? "Modify Intake Request" : intakeModalMode === "additional" ? "Create Additional Document Request" : "Create Intake Request"}
                 </h2>
                 <button
                   onClick={() => setShowIntakeModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
@@ -1390,52 +1576,52 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="p-6 space-y-6">
               {/* Delivery Method */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-3">Send To</h3>
+                <h3 className="card-title mb-3">Send To</h3>
                 {!hasContact ? (
-                  <div className="flex items-start gap-3 p-4 bg-orange-50 border border-orange-200 rounded-xl">
-                    <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
-                    <p className="text-sm text-orange-700">
+                  <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                    <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" strokeWidth={1.75} />
+                    <p className="text-sm text-amber-700">
                       No contact information is available for this client. Please update client contact information before sending an intake request.
                     </p>
                   </div>
                 ) : (
-                  <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                  <div className="border border-line rounded-xl divide-y divide-line">
                     {hasEmail && (
-                      <div className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center gap-3 px-4 py-3 hover:bg-wash transition-colors">
                         <input
                           type="radio"
                           name="intakeDelivery"
                           value="email"
                           checked={deliveryMethod === "email"}
                           onChange={() => setDeliveryMethod("email")}
-                          className="w-4 h-4 accent-cyan-500 cursor-pointer"
+                          className="w-4 h-4 accent-brand cursor-pointer"
                         />
-                        <Mail className="w-4 h-4 text-gray-400 shrink-0" />
+                        <Mail className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm text-gray-900 mb-0.5">Email</div>
+                          <div className="text-sm text-ink mb-0.5">Email</div>
                           {editingEmail ? (
                             <input
                               type="email"
                               value={editableEmail}
                               onChange={(e) => setEditableEmail(e.target.value)}
                               autoFocus
-                              className="w-full text-xs border border-cyan-400 rounded-md px-2 py-1 text-gray-900 focus:outline-none"
+                              className="w-full text-xs border border-brand rounded-md px-2 py-1 text-ink focus:outline-none"
                             />
                           ) : (
-                            <div className="text-xs text-gray-500">{editableEmail}</div>
+                            <div className="text-xs text-[#5B6B78]">{editableEmail}</div>
                           )}
                         </div>
                         {editingEmail ? (
                           <button
                             onClick={() => setEditingEmail(false)}
-                            className="text-xs font-medium text-cyan-600 hover:text-cyan-700 shrink-0 transition-colors"
+                            className="text-xs font-medium text-deep hover:text-ink shrink-0 transition-colors"
                           >
                             Done
                           </button>
                         ) : (
                           <button
                             onClick={() => setEditingEmail(true)}
-                            className="text-xs font-medium text-cyan-600 hover:text-cyan-700 shrink-0 transition-colors"
+                            className="text-xs font-medium text-deep hover:text-ink shrink-0 transition-colors"
                           >
                             Edit
                           </button>
@@ -1443,41 +1629,41 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       </div>
                     )}
                     {hasPhone && (
-                      <div className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center gap-3 px-4 py-3 hover:bg-wash transition-colors">
                         <input
                           type="radio"
                           name="intakeDelivery"
                           value="sms"
                           checked={deliveryMethod === "sms"}
                           onChange={() => setDeliveryMethod("sms")}
-                          className="w-4 h-4 accent-cyan-500 cursor-pointer"
+                          className="w-4 h-4 accent-brand cursor-pointer"
                         />
-                        <MessageSquare className="w-4 h-4 text-gray-400 shrink-0" />
+                        <MessageSquare className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm text-gray-900 mb-0.5">SMS</div>
+                          <div className="text-sm text-ink mb-0.5">SMS</div>
                           {editingPhone ? (
                             <input
                               type="tel"
                               value={editablePhone}
                               onChange={(e) => setEditablePhone(e.target.value)}
                               autoFocus
-                              className="w-full text-xs border border-cyan-400 rounded-md px-2 py-1 text-gray-900 focus:outline-none"
+                              className="w-full text-xs border border-brand rounded-md px-2 py-1 text-ink focus:outline-none"
                             />
                           ) : (
-                            <div className="text-xs text-gray-500">{editablePhone}</div>
+                            <div className="text-xs text-[#5B6B78]">{editablePhone}</div>
                           )}
                         </div>
                         {editingPhone ? (
                           <button
                             onClick={() => setEditingPhone(false)}
-                            className="text-xs font-medium text-cyan-600 hover:text-cyan-700 shrink-0 transition-colors"
+                            className="text-xs font-medium text-deep hover:text-ink shrink-0 transition-colors"
                           >
                             Done
                           </button>
                         ) : (
                           <button
                             onClick={() => setEditingPhone(true)}
-                            className="text-xs font-medium text-cyan-600 hover:text-cyan-700 shrink-0 transition-colors"
+                            className="text-xs font-medium text-deep hover:text-ink shrink-0 transition-colors"
                           >
                             Edit
                           </button>
@@ -1490,12 +1676,12 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Previously Requested — only for additional mode */}
               {intakeModalMode === "additional" && (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Previously Requested</h3>
+                <div className="lg-zone p-4">
+                  <h3 className="text-sm font-semibold text-ink mb-3">Previously Requested</h3>
                   <div className="space-y-1.5">
                     {(intakeRequests[0]?.requestedDocs ?? documents.filter((d) => d.enabled).map((d) => d.name)).map((doc) => (
-                      <div key={doc} className="flex items-center gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" /> {doc}
+                      <div key={doc} className="flex items-center gap-2 text-sm text-[#5B6B78]">
+                        <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" strokeWidth={1.75} /> {doc}
                       </div>
                     ))}
                   </div>
@@ -1504,7 +1690,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Required Documents */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-4">
+                <h3 className="card-title mb-4">
                   {intakeModalMode === "additional" ? "Additional Documents to Request" : "Required Documents"}
                 </h3>
                 <div className="space-y-3">
@@ -1515,13 +1701,13 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         disabled={doc.required}
                         className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
                           doc.enabled
-                            ? "bg-cyan-500 border-cyan-500"
-                            : "bg-white border-gray-300 hover:border-gray-400"
+                            ? "bg-brand border-brand"
+                            : "bg-white border-line hover:border-soft"
                         } ${doc.required ? "cursor-not-allowed" : "cursor-pointer"}`}
                       >
-                        {doc.enabled && <Check className="w-3 h-3 text-white" />}
+                        {doc.enabled && <Check className="w-3 h-3 text-white" strokeWidth={1.75} />}
                       </button>
-                      <span className={`text-sm ${doc.enabled ? "text-gray-900" : "text-gray-500"}`}>
+                      <span className={`text-sm ${doc.enabled ? "text-ink" : "text-[#5B6B78]"}`}>
                         {doc.name}
                       </span>
                     </div>
@@ -1531,36 +1717,36 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Additional Instructions */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-4">Additional Instructions</h3>
+                <h3 className="card-title mb-4">Additional Instructions</h3>
                 <textarea
                   rows={4}
                   value={additionalInstructions}
                   onChange={(e) => setAdditionalInstructions(e.target.value)}
                   placeholder="Provide any additional information or supporting documents that may help evaluate your claim."
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 resize-none transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink placeholder:text-[#5B6B78] focus:outline-none focus:border-brand resize-none transition-all"
                 />
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
               <button
                 onClick={() => { setShowIntakeModal(false); setEmailError(false); setIntakeModalMode("create"); setActiveModifyId(null); }}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 text-ink hover:bg-tint rounded-lg text-sm font-medium transition-colors"
               >
                 Cancel
               </button>
               {intakeModalMode === "create" && (
-                <button onClick={handleCreateForm} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">
+                <button onClick={handleCreateForm} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
                   Create Form
                 </button>
               )}
               <Button
                 onClick={handleSendRequest}
                 disabled={!hasContact}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0 gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="bg-brand hover:bg-deep text-white border-0 gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {intakeModalMode === "modify" ? "Save Changes" : intakeModalMode === "additional" ? "Send Request" : "Send Request"}
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
               </Button>
             </div>
           </div>
@@ -1571,28 +1757,28 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
       {showResendModal && (() => {
         const req = intakeRequests.find((r) => r.id === resendingId) ?? intakeRequests[0];
         return (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-                <h2 className="text-base font-semibold text-gray-900">Resend Intake Request</h2>
-                <button onClick={() => setShowResendModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-                  <X className="w-4 h-4 text-gray-400" />
+          <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl w-full max-w-md shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-5 border-b border-line">
+                <h2 className="card-title">Resend Intake Request</h2>
+                <button onClick={() => setShowResendModal(false)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
               {req && (
                 <div className="p-6 space-y-4">
-                  <p className="text-sm text-gray-500">This will resend the existing intake request to the recipient below.</p>
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl divide-y divide-gray-100">
-                    <div className="px-4 py-3"><div className="text-xs text-gray-400 mb-0.5">Recipient</div><div className="text-sm font-semibold text-gray-900">{req.recipient}</div></div>
-                    <div className="px-4 py-3"><div className="text-xs text-gray-400 mb-0.5">Delivery Method</div><div className="text-sm font-semibold text-gray-900 capitalize">{req.deliveryMethod}</div></div>
-                    <div className="px-4 py-3"><div className="text-xs text-gray-400 mb-0.5">Requested Documents</div><div className="text-sm font-semibold text-gray-900">{req.requestedDocs.join(", ")}</div></div>
+                  <p className="secondary-text">This will resend the existing intake request to the recipient below.</p>
+                  <div className="lg-zone divide-y divide-line">
+                    <div className="px-4 py-3"><div className="eyebrow mb-0.5">Recipient</div><div className="text-sm font-semibold text-ink">{req.recipient}</div></div>
+                    <div className="px-4 py-3"><div className="eyebrow mb-0.5">Delivery Method</div><div className="text-sm font-semibold text-ink capitalize">{req.deliveryMethod}</div></div>
+                    <div className="px-4 py-3"><div className="eyebrow mb-0.5">Requested Documents</div><div className="text-sm font-semibold text-ink">{req.requestedDocs.join(", ")}</div></div>
                   </div>
                 </div>
               )}
-              <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50 border-t border-gray-100">
-                <button onClick={() => setShowResendModal(false)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">Cancel</button>
-                <button onClick={handleConfirmResend} className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium hover:bg-cyan-700 transition-all flex items-center gap-1.5">
-                  <RefreshCw className="w-3.5 h-3.5" /> Resend Request
+              <div className="flex justify-end gap-2 px-6 py-4 bg-wash border-t border-line">
+                <button onClick={() => setShowResendModal(false)} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">Cancel</button>
+                <button onClick={handleConfirmResend} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.75} /> Resend Request
                 </button>
               </div>
             </div>
@@ -1605,45 +1791,45 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
         const req = intakeRequests.find((r) => r.id === viewingSubmissionId);
         const submittedDocs = ["MRI_Report_2026.pdf", "ER_Bills.pdf", "hospital_medical_records.pdf", "police_report_final.pdf", "physical_therapy_notes.pdf", "insurance_policy_v2.pdf", "witness_statement.pdf", "wage_loss_statement.pdf"];
         return (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shrink-0">
+          <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl w-full max-w-2xl shadow-sm overflow-hidden max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-5 border-b border-line shrink-0">
                 <div>
-                  <h2 className="text-base font-semibold text-gray-900">Submission Details</h2>
-                  <p className="text-xs text-gray-400 mt-0.5">{req?.id} · Submitted Jun 12, 2026</p>
+                  <h2 className="card-title">Submission Details</h2>
+                  <p className="mono-ref mt-0.5">{req?.id} · Submitted Jun 12, 2026</p>
                 </div>
-                <button onClick={() => setShowViewSubmissionModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-                  <X className="w-4 h-4 text-gray-400" />
+                <button onClick={() => setShowViewSubmissionModal(false)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
               <div className="flex-1 overflow-auto p-6 space-y-5">
                 <div className="grid grid-cols-3 gap-4">
-                  {[{ label: "Documents Received", value: "8", color: "text-gray-900" }, { label: "Missing Documents", value: "1", color: "text-orange-500" }, { label: "Completion", value: "100%", color: "text-green-600" }].map(({ label, value, color }) => (
-                    <div key={label} className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-center">
-                      <div className={`text-2xl font-bold ${color} mb-1`}>{value}</div>
-                      <div className="text-xs text-gray-400">{label}</div>
+                  {[{ label: "Documents Received", value: "8", color: "text-ink" }, { label: "Missing Documents", value: "1", color: "text-amber-600" }, { label: "Completion", value: "100%", color: "text-green-600" }].map(({ label, value, color }) => (
+                    <div key={label} className="bg-wash border border-line rounded-xl p-4 text-center">
+                      <div className={`kpi-value ${color} mb-1`}>{value}</div>
+                      <div className="text-xs text-[#5B6B78]">{label}</div>
                     </div>
                   ))}
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Received Documents</h3>
-                  <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                  <h3 className="text-sm font-semibold text-ink mb-3">Received Documents</h3>
+                  <div className="border border-line rounded-xl divide-y divide-line">
                     {submittedDocs.map((doc) => (
                       <div key={doc} className="flex items-center justify-between px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <FileText className="w-4 h-4 text-gray-400 shrink-0" />
-                          <span className="text-sm text-gray-900 font-mono">{doc}</span>
+                          <FileText className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                          <span className="mono-ref text-ink">{doc}</span>
                         </div>
-                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" strokeWidth={1.75} />
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50 border-t border-gray-100 shrink-0">
-                <button onClick={() => setShowViewSubmissionModal(false)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">Close</button>
-                <button onClick={handleOpenAdditionalRequest} className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium hover:bg-cyan-700 transition-all flex items-center gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> Create Additional Request
+              <div className="flex justify-end gap-2 px-6 py-4 bg-wash border-t border-line shrink-0">
+                <button onClick={() => setShowViewSubmissionModal(false)} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">Close</button>
+                <button onClick={handleOpenAdditionalRequest} className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" strokeWidth={1.75} /> Create Additional Request
                 </button>
               </div>
             </div>
@@ -1653,16 +1839,16 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Follow-up Modal */}
       {showFollowUpModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Send Follow-up Request</h2>
+                <h2 className="section-header">Send Follow-up Request</h2>
                 <button
                   onClick={() => setShowFollowUpModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
@@ -1670,20 +1856,20 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="p-6 space-y-6">
               {/* Recipient */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-2">Recipient</h3>
-                <div className="text-sm text-gray-900">{recipientEmail}</div>
+                <h3 className="card-title mb-2">Recipient</h3>
+                <div className="text-sm text-ink">{recipientEmail}</div>
               </div>
 
               {/* Missing Documents */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-3">Missing Documents</h3>
+                <h3 className="card-title mb-3">Missing Documents</h3>
                 <div className="space-y-2">
                   {missingDocuments.map((doc) => (
                     <div key={doc} className="flex items-center gap-3">
-                      <div className="w-5 h-5 rounded border bg-cyan-500 border-cyan-500 flex items-center justify-center">
-                        <Check className="w-3 h-3 text-white" />
+                      <div className="w-5 h-5 rounded border bg-brand border-brand flex items-center justify-center">
+                        <Check className="w-3 h-3 text-white" strokeWidth={1.75} />
                       </div>
-                      <span className="text-sm text-gray-900">{doc}</span>
+                      <span className="text-sm text-ink">{doc}</span>
                     </div>
                   ))}
                 </div>
@@ -1691,26 +1877,26 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Message */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-3">Message</h3>
+                <h3 className="card-title mb-3">Message</h3>
                 <textarea
                   rows={8}
                   value={followUpMessage}
                   onChange={(e) => setFollowUpMessage(e.target.value)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 resize-none transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink focus:outline-none focus:border-brand resize-none transition-all"
                 />
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
               <button
                 onClick={() => setShowFollowUpModal(false)}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 text-ink hover:bg-tint rounded-lg text-sm font-medium transition-colors"
               >
                 Cancel
               </button>
               <Button
                 onClick={handleSendFollowUp}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0"
+                className="bg-brand hover:bg-deep text-white border-0"
               >
                 Send Follow-up
               </Button>
@@ -1721,21 +1907,21 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Send Retainer Modal */}
       {showSendRetainerModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Send Retainer Agreement</h2>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <h2 className="section-header">Send Retainer Agreement</h2>
+                  <p className="secondary-text mt-1">
                     Select a retainer template and send it to the plaintiff for signature.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowSendRetainerModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
@@ -1743,37 +1929,37 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="p-6 space-y-6">
               {/* Recipient Information */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-4">Recipient Information</h3>
+                <h3 className="card-title mb-4">Recipient Information</h3>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Plaintiff Name</label>
+                    <label className="block text-sm font-medium text-ink mb-2">Plaintiff Name</label>
                     <input
                       type="text"
                       value={data.plaintiff}
                       disabled
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-500 cursor-not-allowed"
+                      className="w-full bg-wash border border-line rounded-lg px-4 py-3 text-sm text-[#5B6B78] cursor-not-allowed"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Recipient Email</label>
+                      <label className="block text-sm font-medium text-ink mb-2">Recipient Email</label>
                       <input
                         type="email"
                         value={retainerEmail}
                         onChange={(e) => setRetainerEmail(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 focus:outline-none focus:border-cyan-500 transition-all"
+                        className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink focus:outline-none focus:border-brand transition-all"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Recipient Phone</label>
+                      <label className="block text-sm font-medium text-ink mb-2">Recipient Phone</label>
                       <input
                         type="tel"
                         value={retainerPhone}
                         onChange={(e) => setRetainerPhone(e.target.value)}
                         placeholder="+1 (555) 123-4567"
-                        className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 transition-all"
+                        className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink placeholder:text-[#5B6B78] focus:outline-none focus:border-brand transition-all"
                       />
                     </div>
                   </div>
@@ -1782,15 +1968,15 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Retainer Template */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-4">Retainer Template</h3>
+                <h3 className="card-title mb-4">Retainer Template</h3>
                 <div className="space-y-3">
                   {retainerTemplates.map((template) => (
                     <div
                       key={template.id}
                       className={`border rounded-xl p-4 transition-all cursor-pointer ${
                         selectedTemplate === template.id
-                          ? "border-cyan-500 bg-cyan-50"
-                          : "border-gray-200 hover:border-gray-300 bg-white"
+                          ? "border-brand bg-tint"
+                          : "border-line hover:border-soft bg-white"
                       }`}
                       onClick={() => setSelectedTemplate(template.id)}
                     >
@@ -1800,8 +1986,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                             <div
                               className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
                                 selectedTemplate === template.id
-                                  ? "border-cyan-500 bg-cyan-500"
-                                  : "border-gray-300 bg-white"
+                                  ? "border-brand bg-brand"
+                                  : "border-line bg-white"
                               }`}
                             >
                               {selectedTemplate === template.id && (
@@ -1810,8 +1996,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                             </div>
                           </div>
                           <div className="flex-1">
-                            <div className="font-semibold text-gray-900 mb-1">{template.name}</div>
-                            <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <div className="font-semibold text-ink mb-1">{template.name}</div>
+                            <div className="flex items-center gap-4 text-xs text-[#5B6B78]">
                               <span>Last Updated: {template.lastUpdated}</span>
                               <span>•</span>
                               <span>Created By: {template.createdBy}</span>
@@ -1823,7 +2009,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                             e.stopPropagation();
                             handlePreviewTemplate(template.id);
                           }}
-                          className="px-3 py-1.5 text-sm font-medium text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
+                          className="px-3 py-1.5 text-sm font-medium text-deep hover:bg-tint rounded-lg transition-colors"
                         >
                           Preview
                         </button>
@@ -1835,30 +2021,30 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Optional Message */}
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-2">
-                  Message to Plaintiff <span className="text-gray-400 font-normal">(Optional)</span>
+                <h3 className="card-title mb-2">
+                  Message to Plaintiff <span className="text-[#5B6B78] font-normal">(Optional)</span>
                 </h3>
                 <textarea
                   rows={5}
                   value={retainerMessage}
                   onChange={(e) => setRetainerMessage(e.target.value)}
                   placeholder={`Hello ${data.plaintiff},\n\nPlease review and sign the attached retainer agreement to begin representation.\n\nThank you.`}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-cyan-500 resize-none transition-all"
+                  className="w-full bg-white border border-line rounded-lg px-4 py-3 text-sm text-ink placeholder:text-[#5B6B78] focus:outline-none focus:border-brand resize-none transition-all"
                 />
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
               <button
                 onClick={() => setShowSendRetainerModal(false)}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 text-ink hover:bg-tint rounded-lg text-sm font-medium transition-colors"
               >
                 Cancel
               </button>
               <Button
                 onClick={handleSendRetainer}
                 disabled={!selectedTemplate || !retainerEmail}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-brand hover:bg-deep text-white border-0 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Send Retainer
               </Button>
@@ -1869,44 +2055,44 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Preview Modal */}
       {showPreviewModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Preview Retainer Agreement</h2>
+                <h2 className="section-header">Preview Retainer Agreement</h2>
                 <button
                   onClick={() => setShowPreviewModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
 
             <div className="p-8">
-              <div className="bg-white border border-gray-200 rounded-lg p-8 max-w-3xl mx-auto">
+              <div className="bg-white border border-line rounded-lg p-8 max-w-3xl mx-auto">
                 {/* Firm Branding */}
                 <div className="text-center mb-8">
                   <div className="flex items-center justify-center gap-2 mb-2">
-                    <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg flex items-center justify-center">
+                    <div className="w-10 h-10 bg-ink rounded-lg flex items-center justify-center">
                       <span className="text-white font-bold">LG</span>
                     </div>
                     <div className="text-left">
-                      <div className="text-lg font-bold text-gray-900">LexGuard</div>
-                      <div className="text-xs text-cyan-600">Injury Intel</div>
+                      <div className="text-lg font-bold text-ink">LexGuard</div>
+                      <div className="text-xs text-deep">Injury Intel</div>
                     </div>
                   </div>
-                  <div className="text-sm text-gray-600">123 Legal Ave, Suite 100</div>
-                  <div className="text-sm text-gray-600">Chicago, IL 60601</div>
-                  <div className="text-sm text-gray-600">contact@lexguard.law</div>
+                  <div className="text-sm text-[#5B6B78]">123 Legal Ave, Suite 100</div>
+                  <div className="text-sm text-[#5B6B78]">Chicago, IL 60601</div>
+                  <div className="text-sm text-[#5B6B78]">contact@lexguard.law</div>
                 </div>
 
                 {/* Agreement Content */}
                 <div className="mb-8">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4 text-center">
+                  <h3 className="text-xl font-bold text-ink mb-4 text-center">
                     RETAINER AGREEMENT FOR LEGAL SERVICES
                   </h3>
-                  <div className="space-y-4 text-sm text-gray-700">
+                  <div className="space-y-4 text-sm text-ink">
                     <p>
                       This Retainer Agreement ("Agreement") is entered into on{" "}
                       <span className="font-semibold">[Date]</span> by and between{" "}
@@ -1931,29 +2117,29 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       witness fees, deposition costs, and investigation expenses. These costs will be deducted from
                       any recovery before calculating attorney's fees.
                     </p>
-                    <p className="text-gray-500 italic">[Additional terms and conditions...]</p>
+                    <p className="text-[#5B6B78] italic">[Additional terms and conditions...]</p>
                   </div>
                 </div>
 
                 {/* Signature Section */}
-                <div className="border-t border-gray-200 pt-6 mt-8">
+                <div className="border-t border-line pt-6 mt-8">
                   <div className="grid grid-cols-2 gap-8">
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 mb-4">CLIENT SIGNATURE</div>
-                      <div className="border-b-2 border-gray-300 mb-2 h-12"></div>
-                      <div className="text-xs text-gray-600">Signature</div>
+                      <div className="text-sm font-semibold text-ink mb-4">CLIENT SIGNATURE</div>
+                      <div className="border-b-2 border-line mb-2 h-12"></div>
+                      <div className="text-xs text-[#5B6B78]">Signature</div>
                       <div className="mt-4">
-                        <div className="border-b border-gray-300 mb-1 h-8"></div>
-                        <div className="text-xs text-gray-600">Date</div>
+                        <div className="border-b border-line mb-1 h-8"></div>
+                        <div className="text-xs text-[#5B6B78]">Date</div>
                       </div>
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-gray-900 mb-4">ATTORNEY SIGNATURE</div>
-                      <div className="border-b-2 border-gray-300 mb-2 h-12"></div>
-                      <div className="text-xs text-gray-600">Signature</div>
+                      <div className="text-sm font-semibold text-ink mb-4">ATTORNEY SIGNATURE</div>
+                      <div className="border-b-2 border-line mb-2 h-12"></div>
+                      <div className="text-xs text-[#5B6B78]">Signature</div>
                       <div className="mt-4">
-                        <div className="border-b border-gray-300 mb-1 h-8"></div>
-                        <div className="text-xs text-gray-600">Date</div>
+                        <div className="border-b border-line mb-1 h-8"></div>
+                        <div className="text-xs text-[#5B6B78]">Date</div>
                       </div>
                     </div>
                   </div>
@@ -1961,10 +2147,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-end">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end">
               <button
                 onClick={() => setShowPreviewModal(false)}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 bg-white border border-line hover:bg-wash text-ink rounded-lg text-sm font-medium transition-colors"
               >
                 Close Preview
               </button>
@@ -1975,64 +2161,64 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Missing Document Request Modal */}
       {showMissingRequestModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200 shrink-0">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-line shrink-0">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Missing Document Request</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Review and approve before sending to client</p>
+                <h2 className="section-header">Missing Document Request</h2>
+                <p className="text-xs text-[#5B6B78] mt-0.5">Review and approve before sending to client</p>
               </div>
-              <button onClick={() => setShowMissingRequestModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-5 h-5 text-gray-500" />
+              <button onClick={() => setShowMissingRequestModal(false)} className="p-2 hover:bg-tint rounded-lg transition-colors">
+                <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
               </button>
             </div>
 
             <div className="flex-1 overflow-auto p-6 space-y-6">
               {/* Missing Documents */}
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Missing Documents</h3>
-                <p className="text-xs text-gray-500 mb-3">Uncheck any document you do not want to request.</p>
-                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                <h3 className="text-sm font-semibold text-ink mb-1">Missing Documents</h3>
+                <p className="text-xs text-[#5B6B78] mb-3">Uncheck any document you do not want to request.</p>
+                <div className="border border-line rounded-xl divide-y divide-line">
                   {missingEvidence.map((item) => (
-                    <label key={item.title} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
+                    <label key={item.title} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-wash transition-colors">
                       <input
                         type="checkbox"
                         checked={!!missingCheckedDocs[item.title]}
                         onChange={(e) => handleMissingDocCheck(item.title, e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 accent-cyan-500"
+                        className="w-4 h-4 rounded border-line accent-brand"
                       />
                       <div>
-                        <div className="text-sm text-gray-900">{item.title}</div>
-                        <div className="text-xs text-gray-400 font-mono">{item.expected}</div>
+                        <div className="text-sm text-ink">{item.title}</div>
+                        <div className="text-xs text-[#5B6B78] font-mono">{item.expected}</div>
                       </div>
                     </label>
                   ))}
                 </div>
                 {selectedMissingTitles.length === 0 && (
-                  <p className="text-xs text-orange-600 mt-2">Select at least one document to send a request.</p>
+                  <p className="text-xs text-amber-600 mt-2">Select at least one document to send a request.</p>
                 )}
               </div>
 
               {/* Contact Method */}
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Send To</h3>
-                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                <h3 className="text-sm font-semibold text-ink mb-3">Send To</h3>
+                <div className="border border-line rounded-xl divide-y divide-line">
                   {data.plaintiffEmail && (
-                    <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                      <input type="radio" name="missingDelivery" value="email" checked={missingDeliveryMethod === "email"} onChange={() => setMissingDeliveryMethod("email")} className="w-4 h-4 accent-cyan-500" />
-                      <Mail className="w-4 h-4 text-gray-400 shrink-0" />
+                    <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-wash transition-colors">
+                      <input type="radio" name="missingDelivery" value="email" checked={missingDeliveryMethod === "email"} onChange={() => setMissingDeliveryMethod("email")} className="w-4 h-4 accent-brand" />
+                      <Mail className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
                       <div>
-                        <div className="text-sm text-gray-900">Email</div>
-                        <div className="text-xs text-gray-500">{data.plaintiffEmail}</div>
+                        <div className="text-sm text-ink">Email</div>
+                        <div className="text-xs text-[#5B6B78]">{data.plaintiffEmail}</div>
                       </div>
                     </label>
                   )}
-                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input type="radio" name="missingDelivery" value="sms" checked={missingDeliveryMethod === "sms"} onChange={() => setMissingDeliveryMethod("sms")} className="w-4 h-4 accent-cyan-500" />
-                    <MessageSquare className="w-4 h-4 text-gray-400 shrink-0" />
+                  <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-wash transition-colors">
+                    <input type="radio" name="missingDelivery" value="sms" checked={missingDeliveryMethod === "sms"} onChange={() => setMissingDeliveryMethod("sms")} className="w-4 h-4 accent-brand" />
+                    <MessageSquare className="w-4 h-4 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
                     <div>
-                      <div className="text-sm text-gray-900">SMS</div>
-                      <div className="text-xs text-gray-500">{data.plaintiffPhone || editablePhone}</div>
+                      <div className="text-sm text-ink">SMS</div>
+                      <div className="text-xs text-[#5B6B78]">{data.plaintiffPhone || editablePhone}</div>
                     </div>
                   </label>
                 </div>
@@ -2040,27 +2226,27 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
               {/* Message Preview */}
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">Message Preview</h3>
-                <p className="text-xs text-gray-500 mb-3">This message was generated automatically. You may edit it before sending.</p>
+                <h3 className="text-sm font-semibold text-ink mb-1">Message Preview</h3>
+                <p className="text-xs text-[#5B6B78] mb-3">This message was generated automatically. You may edit it before sending.</p>
                 <textarea
                   value={missingMessageText}
                   onChange={(e) => setMissingMessageText(e.target.value)}
                   rows={10}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 leading-relaxed focus:outline-none focus:border-cyan-400 transition-colors resize-none bg-gray-50"
+                  className="w-full border border-line rounded-xl px-4 py-3 text-sm text-ink leading-relaxed focus:outline-none focus:border-brand transition-colors resize-none bg-wash"
                 />
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 shrink-0">
-              <Button onClick={() => setShowMissingRequestModal(false)} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-line shrink-0">
+              <Button onClick={() => setShowMissingRequestModal(false)} className="bg-white border border-line text-ink hover:bg-wash">
                 Cancel
               </Button>
               <Button
                 disabled={selectedMissingTitles.length === 0}
                 onClick={() => setShowMissingRequestModal(false)}
-                className="bg-cyan-500 hover:bg-cyan-600 text-white border-0 gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="bg-brand hover:bg-deep text-white border-0 gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Send className="w-4 h-4" />
+                <Send className="w-4 h-4" strokeWidth={1.75} />
                 Send Request
               </Button>
             </div>
@@ -2068,157 +2254,46 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
         </div>
       )}
 
-      {/* Document Preview Modal */}
-      {showDocumentPreview && selectedDocument && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-7xl flex flex-col overflow-hidden shadow-2xl" style={{ height: "90vh" }}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900 font-mono">{selectedDocument.name}</h2>
-                <p className="text-xs text-gray-500">{selectedDocument.source} · {selectedDocument.date || "Jun 8, 2026"}</p>
-              </div>
-              <button onClick={() => { setShowDocumentPreview(false); setSelectedDocument(null); }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex flex-1 overflow-hidden">
-              {/* Left — Document Viewer */}
-              <div className="flex-1 flex flex-col border-r border-gray-200 overflow-hidden">
-                {/* Viewer toolbar */}
-                <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50 shrink-0">
-                  <button className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors"><ZoomOut className="w-4 h-4 text-gray-500" /></button>
-                  <span className="text-xs text-gray-500">100%</span>
-                  <button className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors"><ZoomIn className="w-4 h-4 text-gray-500" /></button>
-                  <div className="flex-1" />
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <button className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                    <span>Page 1 of 1</span>
-                    <button className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors"><ChevronRight className="w-4 h-4" /></button>
-                  </div>
-                </div>
-
-                {/* Viewer area */}
-                <div className="flex-1 overflow-auto bg-gray-100 flex items-center justify-center p-8">
-                  <div className="bg-white rounded-xl shadow-md w-full max-w-2xl min-h-[500px] flex items-center justify-center border border-gray-200">
-                    <div className="text-center">
-                      <FileText className="w-14 h-14 text-gray-200 mx-auto mb-3" />
-                      <p className="text-sm text-gray-400 font-mono">{selectedDocument.name}</p>
-                      <p className="text-xs text-gray-300 mt-1">
-                        {selectedDocument.name.endsWith(".pdf") ? "PDF Document" : selectedDocument.name.match(/\.(jpg|jpeg|png|gif)$/i) ? "Image File" : "Document File"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right — Quick Actions or AI Panel */}
-              {previewAiOpen ? (
-                <div className="w-96 flex flex-col shrink-0">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-purple-500" />
-                      <span className="text-sm font-semibold text-gray-900">AI Assistant</span>
-                    </div>
-                    <button onClick={() => setPreviewAiOpen(false)} className="text-xs text-gray-400 hover:text-gray-600 transition-colors">Close</button>
-                  </div>
-                  <div className="flex-1 overflow-auto p-4 space-y-3">
-                    {previewAiMessages.length === 0 ? (
-                      <div className="space-y-2">
-                        <p className="text-xs text-gray-400 mb-3">Try asking:</p>
-                        {["Summarize this document", "What injuries are mentioned?", "Create a treatment timeline", "Does this support liability?", "Identify key findings"].map((p) => (
-                          <button key={p} onClick={() => handleSendPreviewAi(p)} className="w-full text-left text-xs text-gray-700 bg-gray-50 hover:bg-purple-50 hover:text-purple-700 border border-gray-200 hover:border-purple-200 rounded-lg px-3 py-2.5 transition-colors">
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      previewAiMessages.map((msg, i) => (
-                        <div key={i} className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                          <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "bg-purple-500 text-white" : "bg-gray-100 text-gray-900"}`}>
-                            {msg.content}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <div className="border-t border-gray-100 p-4 shrink-0">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={previewAiInput}
-                        onChange={(e) => setPreviewAiInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSendPreviewAi()}
-                        placeholder="Ask anything about this document..."
-                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:border-purple-400 transition-colors"
-                      />
-                      <button onClick={() => handleSendPreviewAi()} className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors">
-                        <Send className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="w-64 shrink-0 p-5 flex flex-col gap-3">
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Quick Actions</h3>
-                  <button
-                    onClick={() => setPreviewAiOpen(true)}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 rounded-xl text-sm font-medium transition-colors text-left"
-                  >
-                    <Bot className="w-4 h-4 shrink-0" />
-                    Chat With AI
-                  </button>
-                  <button className="w-full flex items-center gap-2.5 px-4 py-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-xl text-sm font-medium transition-colors text-left">
-                    <Download className="w-4 h-4 shrink-0" />
-                    Download Document
-                  </button>
-                  <div className="mt-2 pt-3 border-t border-gray-100 space-y-2">
-                    <div className="text-xs text-gray-400 font-medium">File Info</div>
-                    <div className="text-xs text-gray-500"><span className="text-gray-400">Source</span> · {selectedDocument.source}</div>
-                    <div className="text-xs text-gray-500"><span className="text-gray-400">Date</span> · {selectedDocument.date || "Jun 8, 2026"}</div>
-                    <div className="text-xs text-gray-500"><span className="text-gray-400">Status</span> · {selectedDocument.status}</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Document Workspace — unified Preview + Insights modal */}
+      <DocumentWorkspaceModal
+        docs={showDocumentPreview && selectedDocument ? [selectedDocument] : null}
+        initialView={workspaceView}
+        onClose={() => { setShowDocumentPreview(false); setSelectedDocument(null); }}
+        onDownload={() => handleDownloadDocument(selectedDocument)}
+      />
 
       {/* Upload Agreement Modal */}
       {showUploadAgreementModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Upload Signed Agreement</h2>
-              <button onClick={() => setShowUploadAgreementModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-4 h-4 text-gray-400" />
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-line">
+              <h2 className="card-title">Upload Signed Agreement</h2>
+              <button onClick={() => setShowUploadAgreementModal(false)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+                <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-500">Upload a signed copy of the retainer agreement to attach it to this case.</p>
-              <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-cyan-300 transition-colors cursor-pointer">
-                <Upload className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-                <p className="text-sm font-medium text-gray-600 mb-1">Drop file here or click to upload</p>
-                <p className="text-xs text-gray-400">PDF, JPG, PNG up to 20MB</p>
+              <p className="secondary-text">Upload a signed copy of the retainer agreement to attach it to this case.</p>
+              <div className="border-2 border-dashed border-line rounded-xl p-8 text-center hover:border-soft transition-colors cursor-pointer">
+                <Upload className="w-8 h-8 text-[#9BDAEC] mx-auto mb-3" strokeWidth={1.75} />
+                <p className="text-sm font-medium text-ink mb-1">Drop file here or click to upload</p>
+                <p className="text-xs text-[#5B6B78]">PDF, JPG, PNG up to 20MB</p>
               </div>
             </div>
-            <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t border-gray-100">
+            <div className="flex items-center justify-between px-6 py-4 bg-wash border-t border-line">
               <button
                 onClick={() => { setShowUploadAgreementModal(false); }}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-deep hover:text-ink transition-colors"
               >
                 Add Later
               </button>
               <div className="flex gap-2">
-                <button onClick={() => setShowUploadAgreementModal(false)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">
+                <button onClick={() => setShowUploadAgreementModal(false)} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
                   Cancel
                 </button>
                 <button
-                  onClick={() => { setAgreementUploaded(true); setRetainerStatus("signed"); setDemoRetainerState("signed"); setShowUploadAgreementModal(false); }}
-                  className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium hover:bg-cyan-700 transition-all"
+                  onClick={() => { setAgreementUploaded(true); applyDemoRetainer("signed"); setShowUploadAgreementModal(false); }}
+                  className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-deep transition-all"
                 >
                   Upload File
                 </button>
@@ -2230,29 +2305,29 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Generate New Retainer Confirmation Modal */}
       {showGenerateNewRetainerModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-              <h2 className="text-base font-semibold text-gray-900">Generate New Retainer</h2>
-              <button onClick={() => setShowGenerateNewRetainerModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-                <X className="w-4 h-4 text-gray-400" />
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-line">
+              <h2 className="card-title">Generate New Retainer</h2>
+              <button onClick={() => setShowGenerateNewRetainerModal(false)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+                <X className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
               </button>
             </div>
             <div className="p-6 space-y-3">
-              <div className="flex items-start gap-3 p-4 bg-orange-50 border border-orange-200 rounded-xl">
-                <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
-                <p className="text-sm text-orange-800">A signed retainer agreement already exists for this case.</p>
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" strokeWidth={1.75} />
+                <p className="text-sm text-amber-800">A signed retainer agreement already exists for this case.</p>
               </div>
-              <p className="text-sm text-gray-600">Generating a new retainer will <strong>not</strong> replace or modify the signed agreement. A new retainer request will be created and tracked separately.</p>
-              <p className="text-sm text-gray-600">The original signed agreement will remain preserved.</p>
+              <p className="text-sm text-[#5B6B78]">Generating a new retainer will <strong>not</strong> replace or modify the signed agreement. A new retainer request will be created and tracked separately.</p>
+              <p className="text-sm text-[#5B6B78]">The original signed agreement will remain preserved.</p>
             </div>
-            <div className="flex justify-end gap-2 px-6 py-4 bg-gray-50 border-t border-gray-100">
-              <button onClick={() => setShowGenerateNewRetainerModal(false)} className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all">
+            <div className="flex justify-end gap-2 px-6 py-4 bg-wash border-t border-line">
+              <button onClick={() => setShowGenerateNewRetainerModal(false)} className="px-4 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-all">
                 Cancel
               </button>
               <button
                 onClick={() => { setShowGenerateNewRetainerModal(false); handleOpenSendRetainerModal(); }}
-                className="px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-all"
+                className="px-4 py-2 bg-ink hover:bg-deep text-white rounded-lg text-sm font-medium transition-all"
               >
                 Generate New Retainer
               </button>
@@ -2263,56 +2338,56 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
       {/* Mark as Signed Modal */}
       {showMarkSignedModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-sm">
+            <div className="sticky top-0 bg-white border-b border-line px-6 py-4 rounded-t-xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Mark Retainer as Signed</h2>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <h2 className="section-header">Mark Retainer as Signed</h2>
+                  <p className="secondary-text mt-1">
                     Use this option if the retainer agreement was completed outside LECO.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowMarkSignedModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-tint rounded-lg transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-500" />
+                  <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
 
             <div className="p-6">
               <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-2">
-                  Upload Agreement <span className="text-gray-400 font-normal">(Optional)</span>
+                <h3 className="card-title mb-2">
+                  Upload Agreement <span className="text-[#5B6B78] font-normal">(Optional)</span>
                 </h3>
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-cyan-400 hover:bg-cyan-50/50 transition-all cursor-pointer">
-                  <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <div className="border-2 border-dashed border-line rounded-xl p-8 text-center hover:border-soft hover:bg-tint/50 transition-all cursor-pointer">
+                  <Upload className="w-12 h-12 text-[#5B6B78] mx-auto mb-4" strokeWidth={1.75} />
                   <div className="mb-2">
-                    <span className="text-sm font-medium text-gray-900">Drag & Drop</span>
-                    <span className="text-sm text-gray-600"> or </span>
-                    <button className="text-sm font-medium text-cyan-600 hover:text-cyan-700">
+                    <span className="text-sm font-medium text-ink">Drag & Drop</span>
+                    <span className="text-sm text-[#5B6B78]"> or </span>
+                    <button className="text-sm font-medium text-deep hover:text-ink">
                       Browse Files
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-[#5B6B78]">
                     Supported: PDF, DOCX, JPG, PNG
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-2xl flex items-center justify-end gap-3">
+            <div className="sticky bottom-0 bg-white border-t border-line px-6 py-4 rounded-b-xl flex items-center justify-end gap-3">
               <button
                 onClick={handleAddLater}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 text-ink hover:bg-tint rounded-lg text-sm font-medium transition-colors"
               >
                 Add Later
               </button>
               <Button
                 onClick={handleConfirmSigned}
-                className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white border-0"
+                className="bg-brand hover:bg-deep text-white border-0"
               >
                 Confirm Signed
               </Button>

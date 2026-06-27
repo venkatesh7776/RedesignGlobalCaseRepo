@@ -96,15 +96,20 @@ function formatCurrency(n: number) {
   return `$${n.toLocaleString()}`;
 }
 
-export function GlobalCaseRepoPage() {
+interface GlobalCaseRepoPageProps {
+  onOpenWorkspace?: (caseData: any) => void;
+}
+
+export function GlobalCaseRepoPage({ onOpenWorkspace }: GlobalCaseRepoPageProps) {
   const [search, setSearch] = useState("");
   const [caseTypeFilter, setCaseTypeFilter] = useState("All");
   const [jurisdictionFilter, setJurisdictionFilter] = useState("All");
   const [sortBy, setSortBy] = useState("recent");
   const [openedCases, setOpenedCases] = useState<Set<string>>(new Set());
 
-  const handleOpenWorkspace = (id: string) => {
-    setOpenedCases((prev) => new Set([...prev, id]));
+  const handleOpenWorkspace = (c: typeof WORKSPACE_CASES[number]) => {
+    setOpenedCases((prev) => new Set([...prev, c.id]));
+    onOpenWorkspace?.(c);
   };
 
   const filtered = WORKSPACE_CASES.filter((c) => {
@@ -268,7 +273,7 @@ export function GlobalCaseRepoPage() {
                   {/* CTA footer */}
                   <div className="px-6 py-4 border-t border-line">
                     <button
-                      onClick={() => handleOpenWorkspace(c.id)}
+                      onClick={() => handleOpenWorkspace(c)}
                       className="w-full flex items-center justify-center gap-2 py-2.5 bg-ink hover:bg-deep text-white rounded-lg text-sm font-semibold transition-colors"
                     >
                       Open Workspace

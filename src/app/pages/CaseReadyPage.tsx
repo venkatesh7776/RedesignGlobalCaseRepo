@@ -24,6 +24,7 @@ interface CaseReadyPageProps {
   onPipelineUpdate?: (updates: Partial<PipelineState>) => void;
   onStageClick?: (stageName: string) => void;
   onBackToIntake?: () => void;
+  onOpenWorkspace?: () => void;
 }
 
 const CHECKLIST_DETAILS: Record<string, string> = {
@@ -71,7 +72,7 @@ const deliverables = [
   },
 ];
 
-export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake }: CaseReadyPageProps) {
+export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake, onOpenWorkspace }: CaseReadyPageProps) {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
 
   // Derive checklist from pipeline state
@@ -148,6 +149,7 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
                 <div className="eyebrow mb-4">Case Completed</div>
                 <Button
                   disabled={!allComplete}
+                  onClick={onOpenWorkspace}
                   className="btn btn-primary gap-2 w-full disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Open Case Workspace
@@ -297,6 +299,7 @@ export function CaseReadyPage({ caseData, pipeline, onStageClick, onBackToIntake
           <div className="flex items-center gap-3 shrink-0">
             <Button
               disabled={!allComplete}
+              onClick={onOpenWorkspace}
               className="btn btn-primary gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Open Case Workspace

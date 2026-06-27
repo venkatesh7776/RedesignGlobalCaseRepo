@@ -95,11 +95,11 @@ function InsightBlock({ icon: Icon, title, children }: { icon: any; title: strin
    interface in place — the PDF viewer on the left stays visible throughout.
    When `onBackToPreview` is provided, a back control returns to the document-only
    Preview layout (80% viewer / 20% action rail). */
-function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPreview }: { docs: any[]; onDownload?: () => void; startInChat?: boolean; onBackToPreview?: () => void }) {
+function AiIntelligencePanel({ docs, onDownload, startInChat = false, onBackToPreview, insights: insightsOverride }: { docs: any[]; onDownload?: () => void; startInChat?: boolean; onBackToPreview?: () => void; insights?: ReturnType<typeof buildDocInsights> }) {
   const [chatOpen, setChatOpen] = useState(startInChat);
   const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
   const [input, setInput] = useState("");
-  const insights = buildDocInsights(docs);
+  const insights = insightsOverride ?? buildDocInsights(docs);
   const subjectLabel = docs.length > 1 ? `${docs.length} supporting documents` : (docs[0]?.name ?? "document");
 
   const send = (text?: string) => {
@@ -354,6 +354,7 @@ export function DocumentWorkspaceModal(props: {
   position?: number; // 1-based index of the current item
   total?: number;    // total navigable items (signals/rows)
   noteContext?: { contextType: string; reference: string }; // auto-attached to notes
+  insights?: ReturnType<typeof buildDocInsights>; // override the AI Insights content
 }) {
   if (!props.docs || props.docs.length === 0) return null;
   // Remount (reset active tab + view) whenever the document set changes.
@@ -371,6 +372,7 @@ function WorkspaceInner({
   position,
   total,
   noteContext,
+  insights,
 }: {
   docs: any[];
   onClose: () => void;
@@ -381,6 +383,7 @@ function WorkspaceInner({
   position?: number;
   total?: number;
   noteContext?: { contextType: string; reference: string };
+  insights?: ReturnType<typeof buildDocInsights>;
 }) {
   const [activeTab, setActiveTab] = useState(0);
   // Which workspace view is active. Preview = 80/20 (document only + action rail);
@@ -495,6 +498,7 @@ function WorkspaceInner({
               <AiIntelligencePanel
                 key={view}
                 docs={docs}
+                insights={insights}
                 onDownload={onDownload}
                 startInChat={view === "chat"}
                 onBackToPreview={() => setView("preview")}

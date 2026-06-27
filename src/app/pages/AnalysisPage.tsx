@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { StageNavigator } from "../components/StageNavigator";
 import {
-  ChevronLeft, ChevronRight, CheckCircle, FileText, Eye, Download, X,
+  ChevronLeft, ChevronRight, ChevronDown, CheckCircle, FileText, Eye, Download, X,
   AlertCircle, ArrowRight, User, Building2, Shield, Scale, Stethoscope,
   Users, Bot, Sparkles
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { DocActions, DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 import {
-  CaseDocument, classifyDocuments, generateAnalysisFindings,
+  CaseDocument, classifyDocuments, generateAnalysisFindings, AnalysisFinding,
 } from "../types/case";
 
 /* MARKER-MAKE-KIT-INVOKED */
@@ -142,6 +142,17 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
   // Discovered Signals: active tab + whether each tab is expanded past the first 3
   const [signalTab, setSignalTab] = useState<"liability" | "injury">("liability");
   const [signalExpanded, setSignalExpanded] = useState<{ liability: boolean; injury: boolean }>({ liability: false, injury: false });
+  // Which signal cards have their Evidence dropdown expanded (keyed by "tab-index").
+  const [evidenceOpen, setEvidenceOpen] = useState<Set<string>>(new Set());
+  const toggleEvidence = (key: string) =>
+    setEvidenceOpen((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  // Per-set AI Insights passed to the Document Workspace (so the preview's
+  // Insights panel matches the card's inline AI summary).
+  const [insightsSets, setInsightsSets] = useState<(any | undefined)[]>([]);
 
   // Derive everything from shared documents
   const categories = classifyDocuments(documents);
@@ -182,13 +193,28 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
     contexts: ({ contextType: string; reference: string } | undefined)[],
     index = 0,
     view: "preview" | "insights" | "chat" = "preview",
+    insights?: (any | undefined)[],
   ) => {
     setDocSets(sets);
     setSetContexts(contexts);
     setSetIndex(index);
     setWorkspaceView(view);
+    setInsightsSets(insights ?? []);
     setShowDocumentPreview(true);
   };
+
+  // Build the AI Insights for one signal — its conclusion is the headline AI
+  // summary; the evidence quotes are the supporting key points.
+  const signalInsight = (s: AnalysisFinding) => ({
+    summary: s.conclusion,
+    keyPoints: s.evidence.map((e) => e.quote),
+    entities: [
+      { label: "Signal", value: s.tag },
+      { label: "Confidence", value: `${s.confidence}%` },
+    ],
+    supportingDocs: s.evidence.map((e) => e.file),
+    confidence: { level: s.confidence >= 85 ? "High" : "Medium", score: s.confidence },
+  });
 
   // Opened directly from a drawer's supporting evidence (single document).
   const openChatForFile = (file: string) => openSets([[docForFile(file)]], [{ contextType: "Document", reference: file }], 0, "chat");
@@ -431,14 +457,35 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                           {/* Summary */}
                           <p className="body-text leading-relaxed">{item.description}</p>
 
-                          {/* Supporting evidence count */}
-                          <div className="mt-4 pt-4 border-t border-line">
-                            <div className="eyebrow mb-1.5">Evidence</div>
-                            <div className="flex items-center gap-1.5 secondary-text">
-                              <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
-                              {item.evidence.length} Supporting {item.evidence.length === 1 ? "Document" : "Documents"}
-                            </div>
-                          </div>
+                          {/* Supporting evidence — expandable to reveal an AI summary */}
+                          {(() => {
+                            const evKey = `${signalTab}-${i}`;
+                            const evOpen = evidenceOpen.has(evKey);
+                            return (
+                              <div className="mt-4 pt-4 border-t border-line">
+                                <button
+                                  onClick={() => toggleEvidence(evKey)}
+                                  className="w-full flex items-center justify-between gap-2 group"
+                                >
+                                  <span className="eyebrow group-hover:text-ink transition-colors">Evidence</span>
+                                  <ChevronDown className={`w-4 h-4 text-deep transition-transform ${evOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                                </button>
+                                <div className="flex items-center gap-1.5 secondary-text mt-1.5">
+                                  <FileText className="w-4 h-4 text-[#5B6B78]" strokeWidth={1.75} />
+                                  {item.evidence.length} Supporting {item.evidence.length === 1 ? "Document" : "Documents"}
+                                </div>
+                                {evOpen && (
+                                  <div className="mt-3 rounded-lg bg-tint border border-[#D6F2F7] p-3">
+                                    <div className="flex items-center gap-1.5 mb-1.5">
+                                      <Sparkles className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                                      <span className="eyebrow text-deep">AI Summary</span>
+                                    </div>
+                                    <p className="secondary-text leading-relaxed">{item.conclusion}</p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {/* Actions — pinned to the bottom; Preview & Insights open the same
                               workspace. Each signal's full set of supporting documents shows as
@@ -448,7 +495,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                               onClick={() => openSets(
                                 visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
                                 visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
-                                i, "preview",
+                                i, "preview", visible.map(signalInsight),
                               )}
                               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
                             >
@@ -458,7 +505,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                               onClick={() => openSets(
                                 visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
                                 visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
-                                i, "insights",
+                                i, "insights", visible.map(signalInsight),
                               )}
                               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
                             >
@@ -710,6 +757,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
       <DocumentWorkspaceModal
         docs={showDocumentPreview ? activeSet : null}
         noteContext={activeContext}
+        insights={insightsSets[setIndex]}
         initialView={workspaceView}
         position={setIndex + 1}
         total={docSets.length}

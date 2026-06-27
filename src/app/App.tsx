@@ -12,6 +12,7 @@ import { ClassificationPage } from "./pages/ClassificationPage";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { ValuationPage } from "./pages/ValuationPage";
 import { CaseReadyPage } from "./pages/CaseReadyPage";
+import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { NotesProvider } from "./notes/NotesContext";
 import { FloatingNotes } from "./components/FloatingNotes";
 import {
@@ -82,6 +83,15 @@ export default function App() {
     setSelectedCase(caseData);
     setPipeline(buildPipelineForCase(caseData));
     setActivePage("workflow");
+    setSidebarCollapsed(true);
+  };
+
+  // Opening the Case Workspace (from the Global Cases page) always lands on a
+  // fully-processed, review-ready case so every tab has populated content.
+  const handleOpenWorkspace = (caseData: any) => {
+    setSelectedCase(caseData);
+    setPipeline(buildPipelineForCase({ stage: "Ready For Review" }));
+    setActivePage("workspace");
     setSidebarCollapsed(true);
   };
 
@@ -159,12 +169,23 @@ export default function App() {
             onPipelineUpdate={updatePipeline}
             onStageClick={handleStageNavigation}
             onBackToIntake={() => setActivePage("intake")}
+            onOpenWorkspace={() => { setActivePage("workspace"); setSidebarCollapsed(true); }}
+          />
+        );
+      case "workspace":
+        return (
+          <CaseWorkspacePage
+            caseData={selectedCase}
+            analysisFindings={analysisFindings}
+            documents={pipeline.documents}
+            onBackToIntake={() => setActivePage("intake")}
+            onNavigateToValuation={() => setActivePage("valuation")}
           />
         );
       case "intake":
         return <CaseIntakePage onOpenWorkflow={handleOpenWorkflow} />;
       case "cases":
-        return <GlobalCaseRepoPage />;
+        return <GlobalCaseRepoPage onOpenWorkspace={handleOpenWorkspace} />;
       case "clients":
         return <ClientsPage />;
       case "communication":
@@ -185,6 +206,7 @@ export default function App() {
     analysis: "Analysis",
     valuation: "Valuation",
     "case-ready": "Case Ready",
+    workspace: "Case Ready",
   };
   const currentStage = STAGE_BY_PAGE[activePage] ?? "";
   const currentCaseName = selectedCase?.caseName ?? "";

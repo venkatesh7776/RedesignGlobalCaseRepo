@@ -101,6 +101,25 @@ const retainerTemplates = [
   },
 ];
 
+// Bottom-of-tab navigation: a short "what's next" line + a primary CTA that
+// advances to the next tab (or the next stage on the final tab).
+function NextStepBox({ text, ctaLabel, onClick }: { text: string; ctaLabel: string; onClick?: () => void }) {
+  return (
+    <div className="lg-card flex items-center justify-between gap-4 px-6 py-5">
+      <div className="min-w-0">
+        <div className="eyebrow mb-1">Next</div>
+        <p className="body-text">{text}</p>
+      </div>
+      <button
+        onClick={onClick}
+        className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-all"
+      >
+        {ctaLabel} <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+      </button>
+    </div>
+  );
+}
+
 export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onContinue, onStageClick, onBackToIntake }: IntakeWorkflowPageProps) {
   // Default case data if none provided
   const defaultCaseData = {
@@ -128,6 +147,16 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   });
   const toggleAccordion = (key: "retainer" | "request" | "documents") =>
     setAccordionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Workspace tabs: the three collection sections are shown one at a time via a
+  // top tab bar instead of stacked accordions, so switching the tab swaps the
+  // panel below rather than forcing a long vertical scroll.
+  const [activeTab, setActiveTab] = useState<"retainer" | "request" | "documents">(
+    pipeline.retainerStatus !== "signed"
+      ? "retainer"
+      : pipeline.documents.length > 0
+        ? "documents"
+        : "retainer"
+  );
   const [documents, setDocuments] = useState(documentCategories);
   const [showIntakeModal, setShowIntakeModal] = useState(false);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
@@ -611,9 +640,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   // Sidebar task navigation: expand + scroll to the matching workspace section
   const focusSection = (key: "retainer" | "request" | "documents") => {
+    setActiveTab(key);
     setAccordionOpen((prev) => ({ ...prev, [key]: true }));
     setTimeout(() => {
-      document.getElementById(`${key}-section`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("workspace-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 60);
   };
 
@@ -728,8 +758,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
         </div>
 
         {/* SECTION 2 — Main Workspace */}
-        <div className="flex gap-6 items-start">
-          {/* ── LEFT SIDEBAR ── */}
+        {/* flex-row-reverse renders the checklist on the right and the tabs +
+            content on the left, while keeping the checklist first in the DOM. */}
+        <div className="flex flex-row-reverse gap-6 items-start">
+          {/* ── RIGHT SIDEBAR ── */}
           <aside className="w-[320px] shrink-0 sticky top-[150px] space-y-4">
             {/* Collection Checklist */}
             <div className="lg-card p-5">
@@ -784,16 +816,33 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
           {/* ── RIGHT WORKSPACE ── */}
           <div className="flex-1 min-w-0 space-y-3">
 
-          {/* ── Retainer ── */}
-          <div id="retainer-section" className="lg-card overflow-hidden scroll-mt-[150px]">
-            {/* Accordion header */}
-            <div className="flex items-center justify-between gap-4 px-6 py-5">
+          {/* ── Workspace tab bar ── */}
+          <div id="workspace-tabs" className="lg-card p-1.5 flex items-center gap-1.5 scroll-mt-[150px]">
+            {([
+              { key: "retainer" as const, label: "Retainer" },
+              { key: "request" as const, label: "Intake Request" },
+              { key: "documents" as const, label: "Documents" },
+            ]).map((tab) => (
               <button
-                onClick={() => toggleAccordion("retainer")}
-                className="flex items-center gap-3 text-left min-w-0"
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  activeTab === tab.key
+                    ? "bg-brand text-white shadow-sm"
+                    : "text-[#5B6B78] hover:text-ink hover:bg-wash"
+                }`}
               >
-                <span className="card-title">Retainer</span>
+                {tab.label}
               </button>
+            ))}
+          </div>
+
+          {/* ── Retainer ── */}
+          {activeTab === "retainer" && (<>
+          <div id="retainer-section" className="lg-card overflow-hidden scroll-mt-[150px]">
+            {/* Section header */}
+            <div className="flex items-center justify-between gap-4 px-6 py-5">
+              <span className="card-title">Retainer</span>
               <div className="flex items-center gap-3 shrink-0">
                 {effectiveRetainers.length > 1 ? (
                   /* Status filter — multiple retainers */
@@ -824,14 +873,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     </div>
                   </div>
                 ) : null}
-                <button onClick={() => toggleAccordion("retainer")}>
-                  <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 ${accordionOpen.retainer ? "" : "-rotate-90"}`} strokeWidth={1.75} />
-                </button>
               </div>
             </div>
 
-            {accordionOpen.retainer && (
-              <div className="border-t border-line">
+            <div className="border-t border-line">
                 {effectiveRetainers.length === 0 ? (
                   /* ── EMPTY: no retainer sent ── */
                   <div className="text-center py-10 px-6">
@@ -845,7 +890,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         Send Retainer
                       </Button>
                       <Button onClick={handleMarkAsSigned} className="bg-white border border-line text-ink hover:bg-wash">
-                        Mark as Signed
+                        Upload a Signed doc
                       </Button>
                     </div>
                   </div>
@@ -1021,18 +1066,20 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   })()
                 )}
               </div>
-            )}
           </div>
+          <NextStepBox
+            text="Create your intake request to receive the required documents from the plaintiff."
+            ctaLabel="Proceed to Intake Request"
+            onClick={() => setActiveTab("request")}
+          />
+          </>
+          )}
 
           {/* ── Intake Request ── */}
+          {activeTab === "request" && (<>
           <div id="request-section" className="lg-card overflow-hidden scroll-mt-[150px]">
             <div className="flex items-center justify-between gap-4 px-6 py-5">
-              <button
-                onClick={() => toggleAccordion("request")}
-                className="flex items-center gap-3 text-left min-w-0"
-              >
-                <span className="card-title">Intake Request</span>
-              </button>
+              <span className="card-title">Intake Request</span>
               <div className="flex items-center gap-3 shrink-0">
                 {/* Demo toggle — prototype only */}
                 <div className="flex items-center gap-2">
@@ -1051,13 +1098,14 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     })}
                   </div>
                 </div>
-                <button onClick={() => toggleAccordion("request")}>
-                  <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 ${accordionOpen.request ? "" : "-rotate-90"}`} strokeWidth={1.75} />
-                </button>
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  Upload Docs
+                  <input type="file" multiple className="hidden" onChange={handleFileInputChange} />
+                </label>
               </div>
             </div>
-            {accordionOpen.request && (
-              <div className="border-t border-line p-6 bg-offwhite">
+            <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
                 {!intakeCreated ? (
                   <>
@@ -1149,9 +1197,9 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                       onClick={() => {
                                         // Redirect to the Documents → Case Evidence tab instead of opening the modal.
                                         setDocumentsSubTab("intake");
-                                        setAccordionOpen((prev) => ({ ...prev, documents: true }));
+                                        setActiveTab("documents");
                                         setTimeout(() => {
-                                          document.getElementById("documents-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                          document.getElementById("workspace-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
                                         }, 50);
                                       }}
                                       className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-sm font-semibold transition-all"
@@ -1313,22 +1361,24 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 )}
               </div>
               </div>
-            )}
           </div>
+          <NextStepBox
+            text="Review and verify the collected documents, then continue to evidence analysis."
+            ctaLabel="Proceed to Documents"
+            onClick={() => setActiveTab("documents")}
+          />
+          </>
+          )}
 
           {/* ── Documents ── */}
+          {activeTab === "documents" && (<>
           <div id="documents-section" className="lg-card overflow-hidden scroll-mt-[150px]">
-            <button
-              onClick={() => toggleAccordion("documents")}
-              className="w-full flex items-center justify-between px-6 py-5 hover:bg-wash transition-colors text-left"
-            >
+            <div className="w-full flex items-center justify-between px-6 py-5">
               <div className="flex items-center gap-3">
                 <span className="card-title">Documents</span>
               </div>
-              <ChevronDown className={`w-5 h-5 text-[#5B6B78] transition-transform duration-200 shrink-0 ${accordionOpen.documents ? "" : "-rotate-90"}`} strokeWidth={1.75} />
-            </button>
-            {accordionOpen.documents && (
-              <div className="border-t border-line p-6 bg-offwhite">
+            </div>
+            <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
                 {/* MISSING DOCUMENTS BLOCK */}
                 {documentsReceived && missingDocCount > 0 && (
@@ -1548,8 +1598,14 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 )}
               </div>
               </div>
-            )}
           </div>
+          <NextStepBox
+            text="Documents collected. Continue to Stage 2 to analyze the evidence and build the case."
+            ctaLabel="Proceed to Analysis"
+            onClick={onContinue}
+          />
+          </>
+          )}
 
           </div>{/* end right workspace */}
         </div>{/* end section 2 — main workspace */}

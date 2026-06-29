@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { StageNavigator } from "../components/StageNavigator";
-import { ChevronLeft, CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, Sparkles, ChevronDown, FileText, Eye, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { AnalysisFinding } from "../types/case";
+import { DocumentWorkspaceModal } from "../components/DocumentWorkspace";
 
 interface ValuationPageProps {
   caseData?: {
@@ -20,25 +21,55 @@ interface ValuationPageProps {
 }
 
 const economicDamages = [
-  { label: "Medical Expenses", value: "$87,500" },
-  { label: "Lost Wages", value: "$43,200" },
-  { label: "Future Medical Care", value: "$24,750" },
-  { label: "Physical Therapy", value: "$6,000" },
+  { label: "Medical Expenses", value: 87500, category: "Medical Bills", docCount: 18,
+    reasoning: "Every charge traces to an itemized billing document and reconciles to the verified total with no duplicates.",
+    docs: ["Hospital_Bill.pdf", "hospital_medical_records.pdf", "ER_Bills.pdf", "MRI_Report_2026.pdf"] },
+  { label: "Lost Wages", value: 43200, category: "Lost Wages", docCount: 6,
+    reasoning: "Verified against employer payroll records and the plaintiff's pre-incident earnings history.",
+    docs: ["Wage_Loss_Statement.pdf", "Employer_Payroll_Records.pdf"] },
+  { label: "Future Medical Care", value: 24750, category: "Future Medical Care", docCount: 9,
+    reasoning: "Projected from the life-care plan and corroborating treating-physician cost estimates.",
+    docs: ["Life_Care_Plan.pdf", "Treating_Physician_Estimate.pdf"] },
+  { label: "Physical Therapy", value: 6000, category: "Rehabilitation", docCount: 12,
+    reasoning: "Substantiated by the documented physical-therapy treatment record and invoices.",
+    docs: ["PT_Treatment_Notes.pdf", "Therapy_Invoices.pdf"] },
 ];
 
 // Factors that justify the recommended valuation strategy (shown as compact chips).
 const keyFactors = ["Clear Liability", "Severe Injuries", "Strong Evidence", "Favorable Jurisdiction"];
 
-// Non-economic damage categories the recommended multiplier is applied to.
-const appliedCategories = [
-  "Pain & Suffering",
-  "Emotional Distress",
-  "Quality of Life",
-  "Cognitive Impairment",
-  "Physical Impairment",
-  "Dignity & Independence",
-  "Family Relationship Impact",
+// Severity tag → pill class. Mirrors the LECO status-pill palette
+// (risk = red, progress = amber, neutral = teal, complete = green).
+const SEVERITY_PILL: Record<string, string> = {
+  Critical: "pill pill-risk",
+  High: "pill pill-progress",
+  Moderate: "pill pill-neutral",
+  Low: "pill pill-complete",
+};
+
+// Indicative non-economic value contribution per factor, by severity.
+const SEVERITY_VALUE: Record<string, string> = {
+  Critical: "$250K – $400K",
+  High: "$150K – $250K",
+  Moderate: "$75K – $150K",
+  Low: "$25K – $75K",
+};
+
+// Non-economic damage factors the recommended multiplier is applied to. Each
+// carries an AI-assigned severity and a one-line rationale for that severity.
+const damageFactors: { category: string; severity: "Critical" | "High" | "Moderate" | "Low"; rationale: string }[] = [
+  { category: "Pain & Suffering", severity: "Critical", rationale: "Treating-physician records document persistent, chronic pain requiring ongoing pain-management intervention." },
+  { category: "Emotional Distress", severity: "High", rationale: "Mental-health evaluations corroborate diagnosed anxiety and post-traumatic symptoms tied to the incident." },
+  { category: "Quality of Life", severity: "High", rationale: "Functional-capacity assessments show a sustained loss of independence in daily activities and prior hobbies." },
+  { category: "Cognitive Impairment", severity: "Critical", rationale: "Neuropsychological testing confirms measurable deficits in memory, attention, and processing speed." },
+  { category: "Physical Impairment", severity: "High", rationale: "Imaging and orthopedic findings verify permanent mobility restrictions and reduced range of motion." },
+  { category: "Dignity & Independence", severity: "Moderate", rationale: "Reliance on assistive care for routine self-care tasks meaningfully reduces personal autonomy." },
+  { category: "Family Relationship Impact", severity: "Moderate", rationale: "Family statements document caregiving burden and loss of consortium within the household." },
 ];
+
+// AI summary tying the factor severities to the recommended multiplier.
+const multiplierRationale =
+  "Two Critical and three High severity factors — anchored by confirmed cognitive deficits and chronic pain — place this case well above the typical 4–6× range. The breadth and permanence of non-economic harm across all seven verified categories supports the recommended 9× multiplier.";
 
 const baseEconomic = 161450;
 const baseMultiplier = 9;
@@ -49,8 +80,52 @@ function formatCurrency(n: number) {
   return "$" + n.toLocaleString("en-US");
 }
 
+// Compact dollars (e.g. $1.45M, $137K) — keeps ranges from overflowing.
+function formatCompactUSD(n: number) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1000)}K`;
+  return "$" + Math.round(n).toLocaleString("en-US");
+}
+
+// Show a value as a ±15% range instead of an exact figure.
+const RANGE_LOW = 0.85;
+const RANGE_HIGH = 1.15;
+function formatRange(n: number) {
+  return `${formatCompactUSD(n * RANGE_LOW)} – ${formatCompactUSD(n * RANGE_HIGH)}`;
+}
+
+// Show a multiplier as a ±1 range (e.g. 9 → "8× – 10×").
+function multiplierRange(m: number) {
+  return `${m - 1}× – ${m + 1}×`;
+}
+
+// Pad named docs up to `count` with realistic placeholder names.
+function padDocs(names: string[], category: string, count: number): string[] {
+  const slug = category.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
+  const out = [...names];
+  let n = out.length + 1;
+  while (out.length < count) { out.push(`${slug}_${String(n).padStart(2, "0")}.pdf`); n++; }
+  return out;
+}
+
 export function ValuationPage({ caseData, analysisFindings = [], onStageClick, onBackToIntake, onReturnToAnalysis, onProceedToCaseReady }: ValuationPageProps) {
   const [multiplier, setMultiplier] = useState(baseMultiplier);
+  // Damage Factors accordion — collapsed by default.
+  const [damageFactorsOpen, setDamageFactorsOpen] = useState(false);
+  // Economic line items: which rows have their reasoning card expanded, the row
+  // whose details drawer is open, and the preview/insights modal view.
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleRow = (label: string) =>
+    setExpandedRows((prev) => { const n = new Set(prev); if (n.has(label)) n.delete(label); else n.add(label); return n; });
+  const [drawerItem, setDrawerItem] = useState<(typeof economicDamages)[number] | null>(null);
+  const [drawerDocsOpen, setDrawerDocsOpen] = useState(false);
+  const openDrawer = (item: (typeof economicDamages)[number]) => { setDrawerItem(item); setDrawerDocsOpen(false); };
+  const [wsView, setWsView] = useState<"preview" | "insights" | null>(null);
+  const drawerDocs = drawerItem
+    ? padDocs(drawerItem.docs, drawerItem.category, drawerItem.docCount).map((name) => ({
+        id: name, name, source: "Attorney Office", date: "Jun 8, 2026", status: "Processed", category: drawerItem.category,
+      }))
+    : [];
 
   const defaultCaseData = {
     caseName: "Estate of Miller vs Logistics Co.",
@@ -84,6 +159,7 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
         };
 
   return (
+    <>
     <div className="min-h-screen bg-wash">
       {/* Breadcrumb */}
       <div className="bg-white sticky top-0 z-40">
@@ -149,12 +225,34 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 </div>
                 <div className="p-5">
                   <div className="divide-y divide-line">
-                    {economicDamages.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between py-2.5">
-                        <span className="body-text">{item.label}</span>
-                        <span className="text-sm font-medium text-ink tabular-nums">{item.value}</span>
-                      </div>
-                    ))}
+                    {economicDamages.map((item) => {
+                      const open = expandedRows.has(item.label);
+                      return (
+                        <div key={item.label} className="py-2.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <button onClick={() => toggleRow(item.label)} aria-expanded={open} className="flex items-center gap-1.5 text-left min-w-0">
+                              <span className="body-text w-[170px] shrink-0">{item.label}</span>
+                              <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                            </button>
+                            <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatCurrency(item.value)}</span>
+                          </div>
+                          {open && (
+                            <div className="mt-2.5 ml-[22px] rounded-xl border border-line bg-offwhite p-3.5 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="secondary-text">{item.reasoning}</p>
+                                <div className="flex items-center gap-1.5 mt-1.5 text-xs text-[#5B6B78]">
+                                  <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                                  We considered {item.docs[0]} and {item.docCount - 1}+ more documents.
+                                </div>
+                              </div>
+                              <button onClick={() => openDrawer(item)} className="shrink-0 text-sm font-semibold text-deep hover:text-ink transition-colors whitespace-nowrap">
+                                View details →
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="mt-3 pt-3 border-t-2 border-line flex items-center justify-between">
                     <span className="text-sm font-semibold text-ink">Economic Damages Subtotal</span>
@@ -173,11 +271,11 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
                       <div className="eyebrow mb-1">Recommended Multiplier</div>
-                      <div className="text-2xl font-bold text-deep tabular-nums">{baseMultiplier}×</div>
+                      <div className="text-2xl font-bold text-deep tabular-nums">{multiplierRange(baseMultiplier)}</div>
                     </div>
                     <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
                       <div className="eyebrow mb-1">Estimated Non-Economic Damages</div>
-                      <div className="text-2xl font-bold text-ink tabular-nums">{formatCurrency(baseMult)}</div>
+                      <div className="text-2xl font-bold text-ink tabular-nums">{formatRange(baseMult)}</div>
                     </div>
                   </div>
 
@@ -188,21 +286,60 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                       <span className="eyebrow text-deep">Recommended Valuation Strategy</span>
                     </div>
                     <p className="body-text">
-                      LECO recommends applying a <strong className="font-semibold text-ink">{baseMultiplier}× multiplier</strong> to estimate{" "}
+                      LECO recommends applying a <strong className="font-semibold text-ink">{multiplierRange(baseMultiplier)} multiplier</strong> to estimate{" "}
                       <strong className="font-semibold text-ink">Non-Economic Damages</strong> based on the verified case evidence and overall case strength.
                     </p>
                   </div>
 
-                  {/* Applied Categories — what the multiplier covers */}
-                  <div>
-                    <div className="eyebrow mb-3">Applied Categories</div>
-                    <div className="flex flex-wrap gap-2">
-                      {appliedCategories.map((c) => (
-                        <span key={c} className="inline-flex items-center px-3 py-1.5 rounded-full bg-tint border border-[#D6F2F7] text-deep text-xs font-medium">
-                          {c}
-                        </span>
-                      ))}
-                    </div>
+                  {/* Damage Factors — collapsible breakdown of what the multiplier covers */}
+                  <div className="border border-line rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setDamageFactorsOpen((v) => !v)}
+                      aria-expanded={damageFactorsOpen}
+                      className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-wash transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="card-title">Damage Factors</span>
+                          <span className="text-xs font-semibold text-deep bg-tint border border-[#D6F2F7] rounded-full px-2 py-0.5 tabular-nums">
+                            {damageFactors.length}
+                          </span>
+                        </div>
+                        <p className="secondary-text mt-0.5">
+                          Factors contributing to the recommended {multiplierRange(baseMultiplier)} multiplier.
+                        </p>
+                      </div>
+                      <ChevronDown
+                        className={`w-5 h-5 text-[#5B6B78] shrink-0 transition-transform duration-200 ${damageFactorsOpen ? "" : "-rotate-90"}`}
+                        strokeWidth={1.75}
+                      />
+                    </button>
+
+                    {damageFactorsOpen && (
+                      <div className="border-t border-line divide-y divide-[#EAF1F4]">
+                        {damageFactors.map((f) => (
+                          <div key={f.category} className="px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                <span className="text-sm font-semibold text-ink">{f.category}</span>
+                                <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
+                              </div>
+                              <span className="text-sm font-semibold text-ink tabular-nums shrink-0">{SEVERITY_VALUE[f.severity]}</span>
+                            </div>
+                            <p className="secondary-text mt-1">{f.rationale}</p>
+                          </div>
+                        ))}
+
+                        {/* AI Multiplier Rationale — why these factors justify 9× */}
+                        <div className="bg-[#F6FDFF] px-4 py-3.5">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                            <span className="eyebrow text-deep">AI Multiplier Rationale</span>
+                          </div>
+                          <p className="secondary-text">{multiplierRationale}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Recommendation Factors — why 9× was recommended */}
@@ -225,11 +362,11 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 <div className="min-w-0">
                   <div className="eyebrow text-soft mb-1">Total Recommended Value</div>
                   <div className="font-mono text-xs text-soft tabular-nums truncate">
-                    {formatCurrency(baseEconomic)} <span className="text-brand">+</span> {formatCurrency(baseMult)}
+                    {formatCurrency(baseEconomic)} <span className="text-brand">+</span> {formatRange(baseMult)}
                   </div>
                 </div>
-                <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "28px", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
-                  {formatCurrency(baseTotal)}
+                <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "24px", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
+                  {formatRange(baseTotal)}
                 </div>
               </div>
 
@@ -246,14 +383,14 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
             <div className="space-y-5">
               <div>
                 <div className="eyebrow mb-1">Recommended Settlement Value</div>
-                <div className="text-ink font-bold tabular-nums" style={{ fontSize: "32px", lineHeight: 1.1, letterSpacing: "-0.02em" }}>
-                  {formatCurrency(baseTotal)}
+                <div className="text-ink font-bold tabular-nums" style={{ fontSize: "26px", lineHeight: 1.1, letterSpacing: "-0.02em" }}>
+                  {formatRange(baseTotal)}
                 </div>
               </div>
 
               <div className="border-t border-line pt-5">
                 <div className="eyebrow mb-1">Recommended Multiplier</div>
-                <div className="text-2xl font-bold text-deep tabular-nums">{baseMultiplier}×</div>
+                <div className="text-2xl font-bold text-deep tabular-nums">{multiplierRange(baseMultiplier)}</div>
               </div>
 
               <div className="border-t border-line pt-5">
@@ -337,8 +474,8 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 className={`border rounded-xl p-4 text-center transition-all cursor-pointer hover:border-soft ${multiplier < 5 ? "border-brand bg-tint" : "border-line"}`}
               >
                 <div className="eyebrow mb-2">Conservative</div>
-                <div className="text-lg font-bold text-ink">{formatCurrency(baseEconomic + baseEconomic * 3)}</div>
-                <div className="mono-ref mt-1">3x multiplier</div>
+                <div className="text-lg font-bold text-ink">{formatRange(baseEconomic + baseEconomic * 3)}</div>
+                <div className="mono-ref mt-1">{multiplierRange(3)} multiplier</div>
               </button>
               <button
                 type="button"
@@ -346,8 +483,8 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 className={`border rounded-xl p-4 text-center transition-all cursor-pointer hover:border-soft ${multiplier >= 5 && multiplier < 11 ? "border-brand bg-tint" : "border-line"}`}
               >
                 <div className="eyebrow mb-2">Recommended</div>
-                <div className="text-lg font-bold text-ink">{formatCurrency(baseTotal)}</div>
-                <div className="mono-ref mt-1">9x multiplier</div>
+                <div className="text-lg font-bold text-ink">{formatRange(baseTotal)}</div>
+                <div className="mono-ref mt-1">{multiplierRange(9)} multiplier</div>
               </button>
               <button
                 type="button"
@@ -355,8 +492,8 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                 className={`border rounded-xl p-4 text-center transition-all cursor-pointer hover:border-soft ${multiplier >= 11 ? "border-brand bg-tint" : "border-line"}`}
               >
                 <div className="eyebrow mb-2">Aggressive</div>
-                <div className="text-lg font-bold text-ink">{formatCurrency(baseEconomic + baseEconomic * 12)}</div>
-                <div className="mono-ref mt-1">12x multiplier</div>
+                <div className="text-lg font-bold text-ink">{formatRange(baseEconomic + baseEconomic * 12)}</div>
+                <div className="mono-ref mt-1">{multiplierRange(12)} multiplier</div>
               </button>
             </div>
           </div>
@@ -381,5 +518,74 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
 
       </div>
     </div>
+
+    {/* Economic line-item detail drawer */}
+    {drawerItem && (
+      <>
+        <div className="fixed inset-0 bg-ink/40 z-50" onClick={() => setDrawerItem(null)} />
+        <div className="fixed top-0 right-0 h-full w-[380px] max-w-[90vw] bg-white shadow-xl z-50 flex flex-col">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
+            <h2 className="card-title">Document Details</h2>
+            <button onClick={() => setDrawerItem(null)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+              <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div>
+              <div className="eyebrow mb-1">Category</div>
+              <div className="text-sm font-semibold text-ink">{drawerItem.category}</div>
+            </div>
+            <div>
+              <div className="eyebrow mb-1">Amount</div>
+              <div className="text-sm font-semibold text-ink tabular-nums">{formatCurrency(drawerItem.value)}</div>
+            </div>
+
+            <div className="border-t border-line" />
+
+            <div>
+              <div className="eyebrow mb-2">{drawerItem.docCount} Supporting Documents</div>
+              <div className="space-y-1.5">
+                {(drawerDocsOpen ? padDocs(drawerItem.docs, drawerItem.category, drawerItem.docCount) : drawerItem.docs.slice(0, 1)).map((d) => (
+                  <div key={d} className="flex items-center gap-2 rounded-lg border border-line bg-offwhite px-3 py-2">
+                    <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                    <span className="text-xs font-medium text-ink truncate">{d}</span>
+                  </div>
+                ))}
+              </div>
+              {drawerItem.docCount > 1 && (
+                <button onClick={() => setDrawerDocsOpen((o) => !o)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors">
+                  {drawerDocsOpen ? "Show less" : `+${drawerItem.docCount - 1} More`}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${drawerDocsOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-line p-4 flex items-center gap-2">
+            <button onClick={() => setWsView("preview")} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-white border border-line text-ink text-sm font-medium hover:bg-wash transition-colors">
+              <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
+            </button>
+            <button onClick={() => setWsView("insights")} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-colors">
+              <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
+            </button>
+          </div>
+        </div>
+      </>
+    )}
+
+    {/* Preview / Insights document workspace */}
+    <DocumentWorkspaceModal
+      docs={wsView && drawerItem ? drawerDocs : null}
+      contextPanel={drawerItem ? { summary: [
+        { label: "Category", value: drawerItem.category },
+        { label: "Amount", value: formatCurrency(drawerItem.value) },
+        { label: "Supporting Documents", value: String(drawerItem.docCount) },
+      ] } : undefined}
+      initialView={wsView ?? "preview"}
+      onClose={() => setWsView(null)}
+      onDownload={() => {}}
+    />
+    </>
   );
 }

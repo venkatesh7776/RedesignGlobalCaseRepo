@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Eye, Sparkles, Download, FileText, ListChecks, Info, CheckCircle,
-  Bot, Send, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, X,
+  Bot, Send, ChevronLeft, ChevronRight, ChevronDown, ZoomIn, ZoomOut, X, Search,
 } from "lucide-react";
 import { useNotes } from "../notes/NotesContext";
 import { getDocumentContent, type DocBlock } from "./documentText";
@@ -275,6 +275,95 @@ function PreviewActionRail({ onInsights, onChat, onDownload }: { onInsights: () 
   );
 }
 
+/* The Document Context Panel — replaces the bare action rail in preview mode.
+   Keeps the attorney oriented: which damage category, how much, how many docs,
+   the selected document (+ the rest on demand), and a collapsed AI summary. */
+function DocumentContextPanel({
+  ctx, docs, activeIndex, onSelectDoc, onInsights, onChat, onDownload,
+}: {
+  ctx: DocContextPanel;
+  docs: any[];
+  activeIndex: number;
+  onSelectDoc: (idx: number) => void;
+  onInsights: () => void;
+  onChat: () => void;
+  onDownload?: () => void;
+}) {
+  const [docsOpen, setDocsOpen] = useState(false);
+  const activeDoc = docs[activeIndex] ?? docs[0];
+  const others = docs.filter((_, i) => i !== activeIndex);
+  const btn = "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium border transition-colors";
+  return (
+    <div className="w-full h-full flex flex-col bg-white overflow-hidden">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Document Summary */}
+        <div>
+          <div className="eyebrow mb-2">Document Summary</div>
+          <div className="space-y-2.5">
+            {ctx.summary.map(({ label, value }) => (
+              <div key={label} className="flex items-center justify-between gap-3">
+                <span className="text-xs text-[#5B6B78]">{label}</span>
+                <span className="text-sm font-semibold text-ink text-right">{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-line" />
+
+        {/* Documents — selected doc + reveal the rest */}
+        <div>
+          <div className="eyebrow mb-2">Documents</div>
+          <div className="flex items-center gap-2 rounded-lg border border-brand bg-tint px-3 py-2">
+            <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+            <span className="text-xs font-medium text-deep truncate">{activeDoc?.name}</span>
+          </div>
+          {others.length > 0 && (
+            <>
+              <button
+                onClick={() => setDocsOpen((o) => !o)}
+                className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors"
+              >
+                {docsOpen ? "Show less" : `+${others.length} More`}
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${docsOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+              </button>
+              {docsOpen && (
+                <div className="mt-2 space-y-1.5">
+                  {docs.map((d, i) => (
+                    i === activeIndex ? null : (
+                      <button
+                        key={(d.id ?? d.name) + i}
+                        onClick={() => onSelectDoc(i)}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-white text-left hover:bg-wash transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <span className="text-xs text-ink truncate">{d.name}</span>
+                      </button>
+                    )
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Actions — pinned at the bottom */}
+      <div className="border-t border-line p-4 space-y-2 shrink-0">
+        <button onClick={onInsights} className={`${btn} bg-tint border-brand text-deep hover:bg-white`}>
+          <Sparkles className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Insights
+        </button>
+        <button onClick={onChat} className={`${btn} bg-white border-line text-ink hover:bg-wash`}>
+          <Bot className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Chat with AI
+        </button>
+        <button onClick={() => onDownload?.()} className={`${btn} bg-white border-line text-ink hover:bg-wash`}>
+          <Download className="w-4 h-4 shrink-0" strokeWidth={1.75} /> Download
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* Renders one synthesized document-text block (heading / paragraph / fields / list). */
 function DocBlockView({ block }: { block: DocBlock }) {
   switch (block.type) {
@@ -344,6 +433,13 @@ function DocumentPage({ doc }: { doc: any }) {
    • Insights → Left (60%) document viewer · Right (40%) AI Intelligence panel
    `docs` is the set of supporting documents for the current item (signal/row).
    `initialView` controls how the workspace opens. Renders nothing when `docs` is empty. */
+// Context for the preview rail — turns the action-only rail into a Document
+// Context Panel (summary rows + documents). `summary` is a flexible label/value
+// list so each surface (damages, negligence, violations) can supply its own.
+export type DocContextPanel = {
+  summary: { label: string; value: string }[];
+};
+
 export function DocumentWorkspaceModal(props: {
   docs: any[] | null;
   onClose: () => void;
@@ -355,6 +451,7 @@ export function DocumentWorkspaceModal(props: {
   total?: number;    // total navigable items (signals/rows)
   noteContext?: { contextType: string; reference: string }; // auto-attached to notes
   insights?: ReturnType<typeof buildDocInsights>; // override the AI Insights content
+  contextPanel?: DocContextPanel; // when set, the preview rail shows category context
 }) {
   if (!props.docs || props.docs.length === 0) return null;
   // Remount (reset active tab + view) whenever the document set changes.
@@ -373,6 +470,7 @@ function WorkspaceInner({
   total,
   noteContext,
   insights,
+  contextPanel,
 }: {
   docs: any[];
   onClose: () => void;
@@ -384,8 +482,13 @@ function WorkspaceInner({
   total?: number;
   noteContext?: { contextType: string; reference: string };
   insights?: ReturnType<typeof buildDocInsights>;
+  contextPanel?: DocContextPanel;
 }) {
   const [activeTab, setActiveTab] = useState(0);
+  // Document tab strip overflow: show a few pills, collapse the rest into a
+  // searchable "+N more docs" dropdown so the strip never scrolls horizontally.
+  const [docMenuOpen, setDocMenuOpen] = useState(false);
+  const [docSearch, setDocSearch] = useState("");
   // Which workspace view is active. Preview = 80/20 (document only + action rail);
   // insights/chat = 60/40 (document + AI Intelligence panel).
   const [view, setView] = useState<"preview" | "insights" | "chat">(initialView);
@@ -443,30 +546,92 @@ function WorkspaceInner({
         <div className="flex flex-1 overflow-hidden">
           {/* Left — Document Viewer with a tab per supporting document.
               Preview gives the viewer 80%; Insights/Chat share the space 60/40. */}
-          <div className="flex flex-col border-r border-line overflow-hidden" style={{ width: isPreview ? "80%" : "60%" }}>
-            {/* Document tabs/chips — only when the signal has multiple documents */}
-            {docs.length > 1 && (
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-line bg-white overflow-x-auto shrink-0">
-                {docs.map((d, idx) => {
-                  const active = idx === activeTab;
-                  return (
-                    <button
-                      key={(d.id ?? d.name) + idx}
-                      onClick={() => setActiveTab(idx)}
-                      title={d.name}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border whitespace-nowrap transition-colors ${
-                        active
-                          ? "bg-tint border-brand text-deep"
-                          : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
-                      }`}
-                    >
-                      <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                      <span className="max-w-[180px] truncate">{d.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+          <div className="flex flex-col border-r border-line overflow-hidden" style={{ width: isPreview ? (contextPanel ? "70%" : "80%") : "60%" }}>
+            {/* Document tabs/chips — only when the signal has multiple documents.
+                Beyond MAX_PILLS, the rest collapse into a searchable dropdown. */}
+            {docs.length > 1 && (() => {
+              const MAX_PILLS = 5;
+              const overflow = docs.length > MAX_PILLS;
+              // First MAX_PILLS docs; surface the active doc too if it's hidden.
+              const visibleIdx = docs.slice(0, MAX_PILLS).map((_, i) => i);
+              if (overflow && activeTab >= MAX_PILLS) visibleIdx.push(activeTab);
+              const q = docSearch.trim().toLowerCase();
+              const matches = docs.map((d, idx) => ({ d, idx })).filter(({ d }) => d.name.toLowerCase().includes(q));
+              return (
+                <div className="relative border-b border-line bg-white shrink-0">
+                  <div className="flex items-center gap-2 px-4 py-2.5 overflow-x-auto">
+                    {visibleIdx.map((idx) => {
+                      const d = docs[idx];
+                      const active = idx === activeTab;
+                      return (
+                        <button
+                          key={(d.id ?? d.name) + idx}
+                          onClick={() => setActiveTab(idx)}
+                          title={d.name}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border whitespace-nowrap transition-colors ${
+                            active
+                              ? "bg-tint border-brand text-deep"
+                              : "bg-white border-line text-[#5B6B78] hover:border-soft hover:text-ink"
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                          <span className="max-w-[180px] truncate">{d.name}</span>
+                        </button>
+                      );
+                    })}
+                    {overflow && (
+                      <button
+                        onClick={() => setDocMenuOpen((o) => !o)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border whitespace-nowrap transition-colors shrink-0 ${
+                          docMenuOpen ? "bg-tint border-brand text-deep" : "bg-white border-line text-deep hover:border-soft"
+                        }`}
+                      >
+                        +{docs.length - MAX_PILLS} more docs
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${docMenuOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Searchable dropdown with the full document list */}
+                  {docMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setDocMenuOpen(false)} />
+                      <div className="absolute right-4 top-full z-20 mt-1 w-80 max-w-[calc(100%-2rem)] bg-white border border-line rounded-xl shadow-lg overflow-hidden">
+                        <div className="p-2 border-b border-line">
+                          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-wash border border-line">
+                            <Search className="w-3.5 h-3.5 text-[#5B6B78] shrink-0" strokeWidth={1.75} />
+                            <input
+                              autoFocus
+                              value={docSearch}
+                              onChange={(e) => setDocSearch(e.target.value)}
+                              placeholder="Search documents..."
+                              className="flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-[#9BA8B0]"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto py-1">
+                          {matches.map(({ d, idx }) => (
+                            <button
+                              key={(d.id ?? d.name) + idx}
+                              onClick={() => { setActiveTab(idx); setDocMenuOpen(false); setDocSearch(""); }}
+                              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                                idx === activeTab ? "bg-tint text-deep" : "text-ink hover:bg-wash"
+                              }`}
+                            >
+                              <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                              <span className="truncate">{d.name}</span>
+                            </button>
+                          ))}
+                          {matches.length === 0 && (
+                            <div className="px-3 py-4 text-center text-xs text-[#5B6B78]">No documents found</div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Viewer toolbar */}
             <div className="flex items-center gap-3 px-4 py-2.5 border-b border-line bg-wash shrink-0">
@@ -485,15 +650,27 @@ function WorkspaceInner({
             <DocumentPage doc={activeDoc} />
           </div>
 
-          {/* Right — Preview shows a 20% action rail; Insights/Chat show the 40%
-              AI Intelligence Panel (insights across ALL documents in the set). */}
-          <div className="flex flex-col overflow-hidden shrink-0" style={{ width: isPreview ? "20%" : "40%" }}>
+          {/* Right — Preview shows the action rail (or a Document Context Panel
+              when contextPanel is provided); Insights/Chat show the 40% AI panel. */}
+          <div className="flex flex-col overflow-hidden shrink-0" style={{ width: isPreview ? (contextPanel ? "30%" : "20%") : "40%" }}>
             {isPreview ? (
-              <PreviewActionRail
-                onInsights={() => setView("insights")}
-                onChat={() => setView("chat")}
-                onDownload={onDownload}
-              />
+              contextPanel ? (
+                <DocumentContextPanel
+                  ctx={contextPanel}
+                  docs={docs}
+                  activeIndex={activeTab}
+                  onSelectDoc={setActiveTab}
+                  onInsights={() => setView("insights")}
+                  onChat={() => setView("chat")}
+                  onDownload={onDownload}
+                />
+              ) : (
+                <PreviewActionRail
+                  onInsights={() => setView("insights")}
+                  onChat={() => setView("chat")}
+                  onDownload={onDownload}
+                />
+              )
             ) : (
               <AiIntelligencePanel
                 key={view}

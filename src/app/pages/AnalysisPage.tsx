@@ -397,10 +397,10 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
         </div>
 
         {/* ── Analysis Summary + Signals (20 / 80) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-[20fr_80fr] gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[80fr_20fr] gap-6 items-start">
 
-        {/* RIGHT (80%) — Signals + Evidence Verification (the tall, scrolling column) */}
-        <div className="space-y-8 min-w-0 lg:order-2">
+        {/* LEFT (80%) — Signals + Evidence Verification (the tall, scrolling column) */}
+        <div className="space-y-8 min-w-0 lg:order-1">
 
         {/* ── Discovered Liability & Injury Signals ── */}
         <div id="signals-section" className="lg-card p-6 scroll-mt-[150px]">
@@ -584,8 +584,8 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
 
         </div>{/* end signals/evidence column */}
 
-        {/* LEFT (20%) — Analysis Complete: sticky progress + navigation panel */}
-        <div className="lg:order-1 lg:sticky lg:top-[150px] self-start">
+        {/* RIGHT (20%) — Analysis Complete: sticky progress + navigation panel */}
+        <div className="lg:order-2 lg:sticky lg:top-[150px] self-start">
           <div className="lg-card p-5">
             {/* Header */}
             <div className="flex items-center gap-2.5 mb-4">

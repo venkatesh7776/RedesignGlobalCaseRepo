@@ -624,7 +624,9 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     : demoRetainerState;
 
   // ── Collection status — derived entirely from real pipeline/intake state ──
-  const retainerSigned = effectiveRetainers.some((r) => r.status === "Signed");
+  // Retainer is locked to the Awaiting Signature state, so the checklist + gating
+  // reflect "not signed yet" to stay consistent with the section display.
+  const retainerSigned = false;
   const intakeResponseReceived = intakeRequests.some((r) => r.status === "Completed");
   const documentsReceived = sharedDocs.length > 0;
   const processingComplete = documentsReceived && sharedDocs.every((d) => d.status === "Processed");
@@ -857,21 +859,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                       </button>
                     ))}
                   </div>
-                ) : effectiveRetainers.length === 1 ? (
-                  /* Demo toggle — prototype only, single retainer */
-                  <div className="flex items-center gap-2">
-                    <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
-                      {([["sent", "Awaiting Signature"], ["signed", "Signed"]] as const).map(([val, label]) => (
-                        <button
-                          key={val}
-                          onClick={() => applyDemoRetainer(val)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${headerDemoActive === val ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 ) : null}
               </div>
             </div>
@@ -899,7 +886,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                   /* ── SINGLE retainer — compact, content directly in the section ── */
                   (() => {
                     const r = effectiveRetainers[0];
-                    const signed = r.status === "Signed";
+                    // Retainer section shows the Awaiting Signature state only.
+                    const signed = false;
                     const fields = signed
                       ? [
                           { label: "Status", value: "Signed" },
@@ -1081,23 +1069,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="flex items-center justify-between gap-4 px-6 py-5">
               <span className="card-title">Intake Request</span>
               <div className="flex items-center gap-3 shrink-0">
-                {/* Demo toggle — prototype only */}
-                <div className="flex items-center gap-2">
-                  <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
-                    {([["sent", "Sent"], ["received", "Response Received"]] as const).map(([val, label]) => {
-                      const active = val === "received" ? intakeResponseReceived : (intakeSent && !intakeResponseReceived);
-                      return (
-                        <button
-                          key={val}
-                          onClick={() => applyDemoIntake(val)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${active ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
                 <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all cursor-pointer">
                   <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
                   Upload Docs
@@ -1282,8 +1253,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                     </div>
 
                     {/* In the response-received state: Create Additional Request (left) + Upload (right), equal halves. */}
-                    <div className={`grid gap-6 items-start ${intakeResponseReceived ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
-                    {intakeResponseReceived && (() => {
+                    <div className="grid gap-6 items-start grid-cols-1">
+                    {false && (() => {
                       const disableAdditional = intakeRequests.some((r) => r.id !== "REQ-001");
                       return (
                         <div className="lg-card p-6">

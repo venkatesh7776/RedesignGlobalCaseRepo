@@ -58,7 +58,9 @@ function buildPipelineForCase(caseData: any): PipelineState {
     intakeCreated: true,
     intakeSent: true,
     intakeLink: "https://leco.ai/intake/ABX29...",
-    documents: hasDocs ? EXISTING_CASE_DOCUMENTS : [],
+    // No documents are collected yet — the Collection stage starts in its empty
+    // (awaiting documents) state; uploads populate this as they come in.
+    documents: [],
     analysisDone,
     valuationDone,
     notes: [],

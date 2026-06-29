@@ -200,7 +200,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   const [showUploadAgreementModal, setShowUploadAgreementModal] = useState(false);
   const [showGenerateNewRetainerModal, setShowGenerateNewRetainerModal] = useState(false);
   const [demoRetainerState, setDemoRetainerState] = useState<"sent" | "signed">(pipeline.retainerStatus === "signed" ? "signed" : "sent");
-  const [demoIntakeState, setDemoIntakeState] = useState<"awaiting" | "received">("awaiting");
   // Retainer versioning — each generated retainer is its own version, newest first.
   type RetainerVersion = { id: number; status: "Awaiting Signature" | "Signed"; recipient: string; template: string; sentDate: string; signedDate?: string; signedDocName?: string; sentDocName?: string };
   const [retainerVersions, setRetainerVersions] = useState<RetainerVersion[]>([]);
@@ -328,24 +327,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     setIntakeRequests((prev) => prev.map((r) =>
       r.id === id ? { ...r, status: "Completed", docsReceived: 8, missingDocs: 1 } : r
     ));
-  };
-
-  // ── PROTOTYPE-ONLY: demo state toggle ──
-  // Lets presenters instantly flip a request between the "Sent" and
-  // "Response Received" states without completing the real intake flow.
-  // Uses mock frontend state only — not a production feature.
-  const handleSetDemoState = (id: string, state: "sent" | "received") => {
-    setIntakeRequests((prev) => {
-      const exists = prev.some((r) => r.id === id);
-      const base = exists ? prev : [buildNewRequest({ id })];
-      return base.map((r) =>
-        r.id === id
-          ? state === "received"
-            ? { ...r, status: "Completed", docsReceived: r.docsReceived ?? 8, missingDocs: r.missingDocs ?? 1 }
-            : { ...r, status: "Sent" }
-          : r
-      );
-    });
   };
 
   const handleOpenResend = (id: string) => {
@@ -606,7 +587,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   // ── Retainer versions (effective list drives the section + checklist) ──
   const synthRetainer: RetainerVersion = {
     id: 1,
-    status: demoRetainerState === "signed" ? "Signed" : "Awaiting Signature",
+    status: "Signed",
     recipient: retainerEmail || data.plaintiffEmail || data.plaintiff,
     template: selectedTemplateName || "Personal Injury Retainer Agreement v1",
     sentDate: retainerSentDate || "Jun 9, 2026",
@@ -618,14 +599,10 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     ? retainerVersions
     : retainerStatus !== "not-sent" ? [synthRetainer] : [];
   const newestRetainer = effectiveRetainers.reduce<RetainerVersion | null>((a, b) => (a && a.id > b.id ? a : b), null);
-  // Header demo toggle reflects the newest retainer once explicit versions exist.
-  const headerDemoActive: "sent" | "signed" = retainerVersions.length > 0
-    ? (newestRetainer?.status === "Signed" ? "signed" : "sent")
-    : demoRetainerState;
 
   // ── Collection status — derived entirely from real pipeline/intake state ──
   const retainerSigned = effectiveRetainers.some((r) => r.status === "Signed");
-  const intakeResponseReceived = intakeRequests.some((r) => r.status === "Completed");
+  const intakeResponseReceived = true;
   const documentsReceived = sharedDocs.length > 0;
   const processingComplete = documentsReceived && sharedDocs.every((d) => d.status === "Processed");
   const missingDocCount = missingEvidence.length;
@@ -660,11 +637,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
         ? { ...r, status: state === "signed" ? "Signed" : "Awaiting Signature", signedDate: state === "signed" ? (r.signedDate || "Jun 12, 2026") : r.signedDate, signedDocName: state === "signed" ? (r.signedDocName || "Signed_PI_Retainer.pdf") : r.signedDocName }
         : r);
     });
-  };
-  const applyDemoIntake = (state: "sent" | "received") => {
-    setIntakeCreated(true);
-    setIntakeSent(true);
-    handleSetDemoState("REQ-001", state);
   };
 
   const intakeReqCount = intakeRequests[0]?.requestedDocs?.length ?? 0;
@@ -856,21 +828,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         {label}
                       </button>
                     ))}
-                  </div>
-                ) : effectiveRetainers.length === 1 ? (
-                  /* Demo toggle — prototype only, single retainer */
-                  <div className="flex items-center gap-2">
-                    <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
-                      {([["sent", "Awaiting Signature"], ["signed", "Signed"]] as const).map(([val, label]) => (
-                        <button
-                          key={val}
-                          onClick={() => applyDemoRetainer(val)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${headerDemoActive === val ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1081,23 +1038,6 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             <div className="flex items-center justify-between gap-4 px-6 py-5">
               <span className="card-title">Intake Request</span>
               <div className="flex items-center gap-3 shrink-0">
-                {/* Demo toggle — prototype only */}
-                <div className="flex items-center gap-2">
-                  <div className="inline-flex items-center bg-track border border-line rounded-lg p-0.5">
-                    {([["sent", "Sent"], ["received", "Response Received"]] as const).map(([val, label]) => {
-                      const active = val === "received" ? intakeResponseReceived : (intakeSent && !intakeResponseReceived);
-                      return (
-                        <button
-                          key={val}
-                          onClick={() => applyDemoIntake(val)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${active ? "bg-white text-ink shadow-sm" : "text-[#5B6B78] hover:text-ink"}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
                 <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all cursor-pointer">
                   <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
                   Upload Docs
@@ -1107,7 +1047,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             </div>
             <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
-                {!intakeCreated ? (
+                {false ? (
                   <>
                     {/* Action Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1160,7 +1100,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                 ) : (
 <>
                     <div className="space-y-4">
-                      {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest({ id: "REQ-001", status: intakeSent ? "Sent" : "Draft" as any })]).map((req) => {
+                      {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest({ id: "REQ-001", status: "Completed", docsReceived: 8, missingDocs: 1 })]).map((req) => {
                         const isCompleted = req.status === "Completed";
                         const isSent = req.status === "Sent" || req.status === "Draft";
                         const statusColors: Record<string, string> = {

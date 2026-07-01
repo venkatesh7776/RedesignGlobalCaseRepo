@@ -233,6 +233,11 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
     missingDocs?: number;
   }
   const [intakeRequests, setIntakeRequests] = useState<IntakeRequestRecord[]>([]);
+  // Captured once at mount: an existing/progressed case arrives with the intake
+  // already sent AND its documents already on file, so its intake response is
+  // treated as already received. A brand-new case (no documents yet) starts false
+  // and only advances through the real send flow.
+  const [intakeAlreadySent] = useState(pipeline.intakeSent && pipeline.documents.length > 0);
   const [intakeOverflowOpen, setIntakeOverflowOpen] = useState<string | null>(null);
   const [intakeModalMode, setIntakeModalMode] = useState<"create" | "modify" | "additional">("create");
   const [activeModifyId, setActiveModifyId] = useState<string | null>(null);
@@ -587,7 +592,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
   // ── Retainer versions (effective list drives the section + checklist) ──
   const synthRetainer: RetainerVersion = {
     id: 1,
-    status: "Signed",
+    status: retainerStatus === "signed" ? "Signed" : "Awaiting Signature",
     recipient: retainerEmail || data.plaintiffEmail || data.plaintiff,
     template: selectedTemplateName || "Personal Injury Retainer Agreement v1",
     sentDate: retainerSentDate || "Jun 9, 2026",
@@ -602,7 +607,8 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
 
   // ── Collection status — derived entirely from real pipeline/intake state ──
   const retainerSigned = effectiveRetainers.some((r) => r.status === "Signed");
-  const intakeResponseReceived = true;
+  const intakeResponseReceived = intakeRequests.some((r) => r.status === "Completed")
+    || (intakeRequests.length === 0 && intakeAlreadySent);
   const documentsReceived = sharedDocs.length > 0;
   const processingComplete = documentsReceived && sharedDocs.every((d) => d.status === "Processed");
   const missingDocCount = missingEvidence.length;
@@ -1047,7 +1053,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
             </div>
             <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
-                {false ? (
+                {!intakeCreated ? (
                   <>
                     {/* Action Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1072,10 +1078,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                         </div>
                       </button>
 
-                      <button
-                        onClick={() => handleSimulateUpload("Attorney")}
-                        className="lg-card lg-card-i p-8 group text-left"
-                      >
+                      <label className="lg-card lg-card-i p-8 group text-left cursor-pointer block">
                         <div className="space-y-4">
                           <div className="p-4 bg-tint rounded-xl inline-flex">
                             <Upload className="w-6 h-6 text-deep" strokeWidth={1.75} />
@@ -1094,13 +1097,19 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                             </div>
                           </div>
                         </div>
-                      </button>
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => { handleFileInputChange(e); focusSection("documents"); }}
+                        />
+                      </label>
                     </div>
                   </>
                 ) : (
 <>
                     <div className="space-y-4">
-                      {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest({ id: "REQ-001", status: "Completed", docsReceived: 8, missingDocs: 1 })]).map((req) => {
+                      {(intakeRequests.length > 0 ? intakeRequests : [buildNewRequest(intakeAlreadySent ? { id: "REQ-001", status: "Completed", docsReceived: 8, missingDocs: 1 } : { id: "REQ-001", status: intakeSent ? "Sent" : "Draft" as any })]).map((req) => {
                         const isCompleted = req.status === "Completed";
                         const isSent = req.status === "Sent" || req.status === "Draft";
                         const statusColors: Record<string, string> = {
@@ -1265,7 +1274,7 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
                                 ))}
                               </ul>
                               <button
-                                onClick={() => setAccordionOpen((prev) => ({ ...prev, documents: true }))}
+                                onClick={() => focusSection("documents")}
                                 className="mt-2 text-xs font-medium text-green-700 underline hover:text-green-900 transition-colors"
                               >
                                 View in Documents tab →
@@ -1313,13 +1322,43 @@ export function IntakeWorkflowPage({ caseData, pipeline, onPipelineUpdate, onCon
           {/* ── Documents ── */}
           {activeTab === "documents" && (<>
           <div id="documents-section" className="lg-card overflow-hidden scroll-mt-[150px]">
-            <div className="w-full flex items-center justify-between px-6 py-5">
+            <div className="w-full flex items-center justify-between gap-4 px-6 py-5">
               <div className="flex items-center gap-3">
                 <span className="card-title">Documents</span>
               </div>
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand hover:bg-deep text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0">
+                <Upload className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Upload Documents
+                <input type="file" multiple className="hidden" onChange={handleFileInputChange} />
+              </label>
             </div>
             <div className="border-t border-line p-6 bg-offwhite">
               <div className="space-y-6">
+                {/* UPLOAD SUCCESS FEEDBACK */}
+                {showUploadSuccess && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" strokeWidth={1.75} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-green-800 mb-1">
+                          {uploadedFileNames.length} file{uploadedFileNames.length > 1 ? "s" : ""} uploaded successfully
+                        </p>
+                        <ul className="space-y-0.5">
+                          {uploadedFileNames.map((name) => (
+                            <li key={name} className="text-xs text-green-700 font-mono truncate">{name}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <button
+                        onClick={() => setShowUploadSuccess(false)}
+                        className="text-green-400 hover:text-green-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* MISSING DOCUMENTS BLOCK */}
                 {documentsReceived && missingDocCount > 0 && (
                   <div className="rounded-xl p-5" style={{ background: "#FAEEDA", border: "1px solid #FAC775" }}>

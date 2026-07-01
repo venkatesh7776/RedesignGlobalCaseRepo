@@ -47,12 +47,14 @@ const SEVERITY_PILL: Record<string, string> = {
   Low: "pill pill-complete",
 };
 
-// Indicative non-economic value contribution per factor, by severity.
-const SEVERITY_VALUE: Record<string, string> = {
-  Critical: "$250K – $400K",
-  High: "$150K – $250K",
-  Moderate: "$75K – $150K",
-  Low: "$25K – $75K",
+// How much each factor contributes to the recommended multiplier, by severity.
+// These are multiplier ranges (not dollar amounts) — the factors justify the
+// multiplier, which is then applied to the verified economic damages.
+const SEVERITY_MULTIPLIER: Record<string, string> = {
+  Critical: "2×–3×",
+  High: "1×–1.5×",
+  Moderate: "0.5×–1×",
+  Low: "0.25×–0.5×",
 };
 
 // Non-economic damage factors the recommended multiplier is applied to. Each
@@ -66,10 +68,6 @@ const damageFactors: { category: string; severity: "Critical" | "High" | "Modera
   { category: "Dignity & Independence", severity: "Moderate", rationale: "Reliance on assistive care for routine self-care tasks meaningfully reduces personal autonomy." },
   { category: "Family Relationship Impact", severity: "Moderate", rationale: "Family statements document caregiving burden and loss of consortium within the household." },
 ];
-
-// AI summary tying the factor severities to the recommended multiplier.
-const multiplierRationale =
-  "Two Critical and three High severity factors — anchored by confirmed cognitive deficits and chronic pain — place this case well above the typical 4–6× range. The breadth and permanence of non-economic harm across all seven verified categories supports the recommended 9× multiplier.";
 
 const baseEconomic = 161450;
 const baseMultiplier = 9;
@@ -108,6 +106,48 @@ function padDocs(names: string[], category: string, count: number): string[] {
   return out;
 }
 
+// Stable string hash → non-negative int, so per-document amounts/dates are
+// deterministic across renders (no jitter when the drawer re-renders).
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+type DocLine = { name: string; amount: number; aiSummary: string; billingPeriod: string };
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Build an itemized, evidence-backed breakdown for an economic damage category.
+// Amounts are deterministic and reconcile EXACTLY to the verified category total.
+function buildDocBreakdown(item: { value: number; category: string; docCount: number; docs: string[] }): DocLine[] {
+  const files = padDocs(item.docs, item.category, item.docCount);
+  const weights = files.map((f) => 0.6 + (hashStr(f + item.category) % 1000) / 1000); // 0.6 – 1.6
+  const wsum = weights.reduce((a, b) => a + b, 0);
+  // Round each share to the nearest $50, then absorb the rounding drift into the
+  // last line so the itemized amounts sum exactly to the category total.
+  const amounts = weights.map((w) => Math.max(50, Math.round((item.value * w / wsum) / 50) * 50));
+  amounts[amounts.length - 1] += item.value - amounts.reduce((a, b) => a + b, 0);
+
+  return files.map((name, i) => {
+    const h = hashStr(name + i);
+    const m = h % 6;                     // billing window within Jan–Jun 2026
+    const startDay = 1 + (h % 18);
+    const endDay = Math.min(28, startDay + 4 + ((h >> 4) % 16));
+    const summaries = [
+      `Itemized ${item.category.toLowerCase()} charges verified against the provider ledger; line items reconcile with no duplicates.`,
+      `${item.category} entry cross-checked to the source billing statement and confirmed attributable to this claim.`,
+      `Verified ${item.category.toLowerCase()} amount — matches the provider invoice and is supported by treatment records.`,
+    ];
+    return {
+      name,
+      amount: amounts[i],
+      aiSummary: summaries[h % summaries.length],
+      billingPeriod: `${MONTHS[m]} ${startDay} – ${MONTHS[m]} ${endDay}, 2026`,
+    };
+  });
+}
+
 export function ValuationPage({ caseData, analysisFindings = [], onStageClick, onBackToIntake, onReturnToAnalysis, onProceedToCaseReady }: ValuationPageProps) {
   const [multiplier, setMultiplier] = useState(baseMultiplier);
   // Damage Factors accordion — collapsed by default.
@@ -119,13 +159,26 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
     setExpandedRows((prev) => { const n = new Set(prev); if (n.has(label)) n.delete(label); else n.add(label); return n; });
   const [drawerItem, setDrawerItem] = useState<(typeof economicDamages)[number] | null>(null);
   const [drawerDocsOpen, setDrawerDocsOpen] = useState(false);
-  const openDrawer = (item: (typeof economicDamages)[number]) => { setDrawerItem(item); setDrawerDocsOpen(false); };
+  // Which itemized document rows are expanded (keyed by file name).
+  const [expandedDocRows, setExpandedDocRows] = useState<Set<string>>(new Set());
+  const toggleDocRow = (name: string) =>
+    setExpandedDocRows((prev) => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  const openDrawer = (item: (typeof economicDamages)[number]) => { setDrawerItem(item); setDrawerDocsOpen(false); setExpandedDocRows(new Set()); };
   const [wsView, setWsView] = useState<"preview" | "insights" | null>(null);
+  // When a single row's "Preview Document" is used, focus that file in the workspace.
+  const [wsFocus, setWsFocus] = useState<string | null>(null);
+  // Itemized, amount-attributed breakdown for the open category (sums to its total).
+  const breakdown = drawerItem ? buildDocBreakdown(drawerItem) : [];
+  const verifiedTotal = breakdown.reduce((a, d) => a + d.amount, 0);
   const drawerDocs = drawerItem
     ? padDocs(drawerItem.docs, drawerItem.category, drawerItem.docCount).map((name) => ({
         id: name, name, source: "Attorney Office", date: "Jun 8, 2026", status: "Processed", category: drawerItem.category,
       }))
     : [];
+  // Reorder so a row-focused document opens first in the workspace tabs.
+  const orderedDrawerDocs = wsFocus
+    ? [...drawerDocs.filter((d) => d.name === wsFocus), ...drawerDocs.filter((d) => d.name !== wsFocus)]
+    : drawerDocs;
 
   const defaultCaseData = {
     caseName: "Estate of Miller vs Logistics Co.",
@@ -324,19 +377,25 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
                                 <span className="text-sm font-semibold text-ink">{f.category}</span>
                                 <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
                               </div>
-                              <span className="text-sm font-semibold text-ink tabular-nums shrink-0">{SEVERITY_VALUE[f.severity]}</span>
+                              <div className="text-right shrink-0">
+                                <div className="text-sm font-semibold text-ink tabular-nums">{SEVERITY_MULTIPLIER[f.severity]}</div>
+                                <div className="text-[10px] uppercase tracking-wide text-[#8A98A3]">Multiplier</div>
+                              </div>
                             </div>
                             <p className="secondary-text mt-1">{f.rationale}</p>
                           </div>
                         ))}
 
-                        {/* AI Multiplier Rationale — why these factors justify 9× */}
-                        <div className="bg-[#F6FDFF] px-4 py-3.5">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                            <span className="eyebrow text-deep">AI Multiplier Rationale</span>
+                        {/* Summary — combined factors → recommended multiplier → non-economic estimate */}
+                        <div className="bg-tint px-4 py-3.5 space-y-2.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium text-[#5B6B78]">Recommended Multiplier</span>
+                            <span className="text-sm font-bold text-ink tabular-nums">{multiplierRange(baseMultiplier)}</span>
                           </div>
-                          <p className="secondary-text">{multiplierRationale}</p>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium text-[#5B6B78]">Estimated Non-Economic Damages</span>
+                            <span className="text-sm font-bold text-ink tabular-nums">{formatRange(baseMult)}</span>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -545,28 +604,70 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
 
             <div>
               <div className="eyebrow mb-2">{drawerItem.docCount} Supporting Documents</div>
-              <div className="space-y-1.5">
-                {(drawerDocsOpen ? padDocs(drawerItem.docs, drawerItem.category, drawerItem.docCount) : drawerItem.docs.slice(0, 1)).map((d) => (
-                  <div key={d} className="flex items-center gap-2 rounded-lg border border-line bg-offwhite px-3 py-2">
-                    <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
-                    <span className="text-xs font-medium text-ink truncate">{d}</span>
-                  </div>
-                ))}
+              <div className="space-y-2">
+                {(drawerDocsOpen ? breakdown : breakdown.slice(0, 3)).map((doc, i) => {
+                  const open = expandedDocRows.has(doc.name);
+                  return (
+                    <div key={doc.name} className="rounded-lg border border-line bg-offwhite overflow-hidden">
+                      <button onClick={() => toggleDocRow(doc.name)} className="w-full text-left px-3 py-2.5 hover:bg-wash transition-colors">
+                        <div className="eyebrow text-[#8A98A3] mb-1.5">Document {String(i + 1).padStart(2, "0")}</div>
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                          <span className="text-xs font-medium text-ink truncate flex-1">{doc.name}</span>
+                          <span className="text-xs font-semibold text-ink tabular-nums shrink-0">{formatCurrency(doc.amount)}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-deep shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="px-3 pb-3 pt-2.5 border-t border-line bg-white space-y-3">
+                          <div>
+                            <div className="eyebrow flex items-center gap-1.5 mb-1">
+                              <Sparkles className="w-3 h-3 text-deep" strokeWidth={1.75} /> AI Summary
+                            </div>
+                            <p className="text-xs text-[#5B6B78] leading-relaxed">{doc.aiSummary}</p>
+                          </div>
+                          <div>
+                            <div className="eyebrow mb-1">Billing Period</div>
+                            <p className="text-xs font-medium text-ink">{doc.billingPeriod}</p>
+                          </div>
+                          <button
+                            onClick={() => { setWsFocus(doc.name); setWsView("preview"); }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-line text-deep text-xs font-medium hover:bg-tint transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> Preview Document
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-              {drawerItem.docCount > 1 && (
+              {drawerItem.docCount > 3 && (
                 <button onClick={() => setDrawerDocsOpen((o) => !o)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors">
-                  {drawerDocsOpen ? "Show less" : `+${drawerItem.docCount - 1} More`}
+                  {drawerDocsOpen ? "Show less" : `+${drawerItem.docCount - 3} More`}
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${drawerDocsOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
                 </button>
               )}
             </div>
+
+            {/* Verified Total — itemized amounts reconcile to the category total */}
+            <div className="border-t border-line pt-4">
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-tint border border-[#D6F2F7] px-3.5 py-3">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                  <span className="text-xs font-semibold text-deep">Verified Total</span>
+                </div>
+                <span className="text-sm font-bold text-ink tabular-nums">{formatCurrency(verifiedTotal)}</span>
+              </div>
+              <p className="text-[11px] text-[#8A98A3] mt-1.5">Sum of all {drawerItem.docCount} itemized documents · matches the verified {drawerItem.category} total.</p>
+            </div>
           </div>
 
           <div className="border-t border-line p-4 flex items-center gap-2">
-            <button onClick={() => setWsView("preview")} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-white border border-line text-ink text-sm font-medium hover:bg-wash transition-colors">
+            <button onClick={() => { setWsFocus(null); setWsView("preview"); }} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-white border border-line text-ink text-sm font-medium hover:bg-wash transition-colors">
               <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
             </button>
-            <button onClick={() => setWsView("insights")} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-colors">
+            <button onClick={() => { setWsFocus(null); setWsView("insights"); }} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-colors">
               <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
             </button>
           </div>
@@ -576,14 +677,14 @@ export function ValuationPage({ caseData, analysisFindings = [], onStageClick, o
 
     {/* Preview / Insights document workspace */}
     <DocumentWorkspaceModal
-      docs={wsView && drawerItem ? drawerDocs : null}
+      docs={wsView && drawerItem ? orderedDrawerDocs : null}
       contextPanel={drawerItem ? { summary: [
         { label: "Category", value: drawerItem.category },
         { label: "Amount", value: formatCurrency(drawerItem.value) },
         { label: "Supporting Documents", value: String(drawerItem.docCount) },
       ] } : undefined}
       initialView={wsView ?? "preview"}
-      onClose={() => setWsView(null)}
+      onClose={() => { setWsView(null); setWsFocus(null); }}
       onDownload={() => {}}
     />
     </>

@@ -55,6 +55,53 @@ function formatRange(n: number) {
   return `${formatCompact(n * 0.85)} – ${formatCompact(n * 1.15)}`;
 }
 
+// Show a multiplier as a ±1 range (e.g. 9 → "8× – 10×").
+function multiplierRange(m: number) {
+  return `${m - 1}× – ${m + 1}×`;
+}
+
+// Stable string hash → non-negative int, so per-document amounts/dates are
+// deterministic across renders (no jitter when a drawer re-renders).
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+type DocLine = { name: string; amount: number; aiSummary: string; billingPeriod: string };
+
+const BREAKDOWN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Build an itemized, evidence-backed breakdown for an economic damage category.
+// Amounts are deterministic and reconcile EXACTLY to the verified category total.
+function buildDocBreakdown(item: { value: number; category: string; docCount: number; docs: string[] }): DocLine[] {
+  const files = padDocsToCount(item.docs, item.category, item.docCount);
+  const weights = files.map((f) => 0.6 + (hashStr(f + item.category) % 1000) / 1000); // 0.6 – 1.6
+  const wsum = weights.reduce((a, b) => a + b, 0);
+  // Round each share to the nearest $50, then absorb the rounding drift into the
+  // last line so the itemized amounts sum exactly to the category total.
+  const amounts = weights.map((w) => Math.max(50, Math.round((item.value * w / wsum) / 50) * 50));
+  amounts[amounts.length - 1] += item.value - amounts.reduce((a, b) => a + b, 0);
+
+  return files.map((name, i) => {
+    const h = hashStr(name + i);
+    const m = h % 6;                     // billing window within Jan–Jun 2026
+    const startDay = 1 + (h % 18);
+    const endDay = Math.min(28, startDay + 4 + ((h >> 4) % 16));
+    const summaries = [
+      `Itemized ${item.category.toLowerCase()} charges verified against the provider ledger; line items reconcile with no duplicates.`,
+      `${item.category} entry cross-checked to the source billing statement and confirmed attributable to this claim.`,
+      `Verified ${item.category.toLowerCase()} amount — matches the provider invoice and is supported by treatment records.`,
+    ];
+    return {
+      name,
+      amount: amounts[i],
+      aiSummary: summaries[h % summaries.length],
+      billingPeriod: `${BREAKDOWN_MONTHS[m]} ${startDay} – ${BREAKDOWN_MONTHS[m]} ${endDay}, 2026`,
+    };
+  });
+}
+
 // Pad a list of named documents up to `count` with realistic placeholder names,
 // so a category's preview reflects its full supporting-document count.
 function padDocsToCount(names: string[], category: string, count: number): string[] {
@@ -1359,12 +1406,30 @@ export function MedicalTimelineTab({ documents, goTo }: TabProps) {
 // the Valuation stage, which this page links out to at the bottom.
 
 const ECONOMIC = [
-  { label: "Medical Expenses", desc: "Emergency, hospital, imaging & physician bills", value: 87500, icon: Stethoscope },
-  { label: "Lost Wages", desc: "Documented income loss during treatment", value: 43200, icon: DollarSign },
-  { label: "Future Medical Care", desc: "Projected ongoing medical management", value: 18750, icon: HeartPulse },
-  { label: "Physical Therapy", desc: "Physical therapy & rehabilitation program", value: 6000, icon: Activity },
-  { label: "Transportation", desc: "Mileage & medical travel costs", value: 3850, icon: MapPin },
-  { label: "Other Expenses", desc: "Assistive devices & out-of-pocket costs", value: 2150, icon: ClipboardList },
+  { label: "Medical Expenses", desc: "Emergency, hospital, imaging & physician bills", value: 87500, icon: Stethoscope,
+    category: "Medical Bills", docCount: 18,
+    reasoning: "Every charge traces to an itemized billing document and reconciles to the verified total with no duplicates.",
+    docs: ["Hospital_Bill.pdf", "hospital_medical_records.pdf", "ER_Bills.pdf", "MRI_Report_2026.pdf"] },
+  { label: "Lost Wages", desc: "Documented income loss during treatment", value: 43200, icon: DollarSign,
+    category: "Lost Wages", docCount: 6,
+    reasoning: "Verified against employer payroll records and the plaintiff's pre-incident earnings history.",
+    docs: ["Wage_Loss_Statement.pdf", "Employer_Payroll_Records.pdf"] },
+  { label: "Future Medical Care", desc: "Projected ongoing medical management", value: 18750, icon: HeartPulse,
+    category: "Future Medical Care", docCount: 9,
+    reasoning: "Projected from the life-care plan and corroborating treating-physician cost estimates.",
+    docs: ["Life_Care_Plan.pdf", "Treating_Physician_Estimate.pdf"] },
+  { label: "Physical Therapy", desc: "Physical therapy & rehabilitation program", value: 6000, icon: Activity,
+    category: "Rehabilitation", docCount: 12,
+    reasoning: "Substantiated by the documented physical-therapy treatment record and invoices.",
+    docs: ["PT_Treatment_Notes.pdf", "Therapy_Invoices.pdf"] },
+  { label: "Transportation", desc: "Mileage & medical travel costs", value: 3850, icon: MapPin,
+    category: "Transportation", docCount: 5,
+    reasoning: "Mileage and medical-travel expenses tied to documented appointments at the standard reimbursement rate.",
+    docs: ["Mileage_Log.pdf"] },
+  { label: "Other Expenses", desc: "Assistive devices & out-of-pocket costs", value: 2150, icon: ClipboardList,
+    category: "Other Damages", docCount: 4,
+    reasoning: "Assistive devices and out-of-pocket costs, each backed by an itemized receipt.",
+    docs: ["Out_of_Pocket_Receipts.pdf"] },
 ];
 
 // Non-economic damage categories the recommended multiplier is applied to.
@@ -1375,6 +1440,16 @@ const SEVERITY_PILL: Record<string, string> = {
   High: "pill pill-progress",
   Moderate: "pill pill-neutral",
   Low: "pill pill-complete",
+};
+
+// How much each factor contributes to the recommended multiplier, by severity.
+// These are multiplier ranges (not dollar amounts) — the factors justify the
+// multiplier, which is then applied to the verified economic damages.
+const SEVERITY_MULTIPLIER: Record<string, string> = {
+  Critical: "2×–3×",
+  High: "1×–1.5×",
+  Moderate: "0.5×–1×",
+  Low: "0.25×–0.5×",
 };
 
 // Non-economic damage factors the recommended multiplier is applied to. Each
@@ -1389,9 +1464,6 @@ const DA_DAMAGE_FACTORS: { category: string; severity: "Critical" | "High" | "Mo
   { category: "Family Relationship Impact", severity: "Moderate", rationale: "Family statements document caregiving burden and loss of consortium within the household." },
 ];
 
-// AI summary tying the factor severities to the recommended multiplier.
-const DA_MULTIPLIER_RATIONALE =
-  "Two Critical and three High severity factors — anchored by confirmed cognitive deficits and chronic pain — place this case well above the typical 4–6× range. The breadth and permanence of non-economic harm across all seven verified categories supports the recommended 9× multiplier.";
 // Why LECO recommends the 9× multiplier.
 const DA_STRATEGY_FACTORS = ["Clear Liability", "Severe Injuries", "Strong Supporting Evidence", "Favorable Jurisdiction"];
 
@@ -1486,6 +1558,31 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const [wsIndex, setWsIndex] = useState(0);
   const [wsView, setWsView] = useState<"preview" | "insights">("preview");
   const docForFile = buildDocResolver(documents);
+
+  // ── Economic line-item detail drawer (mirrors the Valuation page) ──
+  // Which Economic Damages rows are expanded (reasoning + View details).
+  const [ecoRowsOpen, setEcoRowsOpen] = useState<Set<string>>(new Set());
+  const toggleEcoRow = (label: string) =>
+    setEcoRowsOpen((prev) => { const n = new Set(prev); if (n.has(label)) n.delete(label); else n.add(label); return n; });
+  const [drawerItem, setDrawerItem] = useState<(typeof ECONOMIC)[number] | null>(null);
+  const [drawerDocsOpen, setDrawerDocsOpen] = useState(false);
+  // Which itemized document rows are expanded (keyed by file name).
+  const [expandedDocRows, setExpandedDocRows] = useState<Set<string>>(new Set());
+  const toggleDocRow = (name: string) =>
+    setExpandedDocRows((prev) => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  const openDrawer = (item: (typeof ECONOMIC)[number]) => { setDrawerItem(item); setDrawerDocsOpen(false); setExpandedDocRows(new Set()); };
+  // Preview/Insights workspace for the drawer's documents (separate from the
+  // Verified Damage Evidence workspace below).
+  const [ecoWsView, setEcoWsView] = useState<"preview" | "insights" | null>(null);
+  const [ecoWsFocus, setEcoWsFocus] = useState<string | null>(null);
+  const breakdown = drawerItem ? buildDocBreakdown(drawerItem) : [];
+  const verifiedTotal = breakdown.reduce((a, d) => a + d.amount, 0);
+  const drawerDocs = drawerItem
+    ? padDocsToCount(drawerItem.docs, drawerItem.category, drawerItem.docCount).map((name) => docForFile(name))
+    : [];
+  const orderedDrawerDocs = ecoWsFocus
+    ? [...drawerDocs.filter((d) => d.name === ecoWsFocus), ...drawerDocs.filter((d) => d.name !== ecoWsFocus)]
+    : drawerDocs;
   // Each category lists a few named files plus a larger docCount. Pad the named
   // set up to docCount with realistic supporting-document names so the preview
   // shows the full set (and the "+N more docs" menu appears for large sets).
@@ -1497,7 +1594,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
     keyPoints: d.insight.keyPoints,
     entities: [
       { label: "Category", value: d.category },
-      { label: "Verified Amount", value: formatRange(d.amount) },
+      { label: "Verified Amount", value: formatUSD(d.amount) },
     ],
     supportingDocs: [d.primary, ...d.docs],
     confidence: { level: "High", score: 96 },
@@ -1506,7 +1603,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
   const evidencePanels = DAMAGE_EVIDENCE.map((d) => ({
     summary: [
       { label: "Category", value: d.category },
-      { label: "Estimated Amount", value: formatRange(d.amount) },
+      { label: "Verified Amount", value: formatUSD(d.amount) },
       { label: "Supporting Documents", value: String(d.docCount) },
     ],
   }));
@@ -1557,7 +1654,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
             onClick={() => scrollTo(economicRef)}
             className="rounded-xl border border-line bg-offwhite p-4 text-left transition-all hover:border-brand hover:bg-tint hover:shadow-sm"
           >
-            <div className="text-xl font-bold text-ink tabular-nums">{formatRange(model.economicTotal)}</div>
+            <div className="text-xl font-bold text-ink tabular-nums">{formatUSD(model.economicTotal)}</div>
             <div className="eyebrow mt-1">Economic Damages</div>
           </button>
 
@@ -1600,13 +1697,13 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
         <h2 className="section-header">Damages Summary</h2>
         <div className="bg-tint border border-[#D6F2F7] rounded-xl p-5 space-y-4">
           <p className="body-text leading-relaxed">
-            Verified economic damages total <strong className="font-semibold text-ink">{formatRange(model.economicTotal)}</strong>, supported by
+            Verified economic damages total <strong className="font-semibold text-ink">{formatUSD(model.economicTotal)}</strong>, supported by
             medical records, billing statements, employment records, and rehabilitation documentation.
           </p>
           <p className="body-text leading-relaxed">
             Based on the severity of injuries, permanent impairment, and strong liability evidence, LECO estimates{" "}
             <strong className="font-semibold text-ink">{formatRange(model.nonEconomicTotal)}</strong> in Non-Economic Damages using a{" "}
-            <strong className="font-semibold text-ink">{model.multiplier}× multiplier</strong>.
+            <strong className="font-semibold text-ink">{multiplierRange(model.multiplier)} multiplier</strong>.
           </p>
         </div>
         <div className="bg-ink rounded-xl px-6 py-5 flex items-center justify-between gap-4">
@@ -1635,21 +1732,41 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
             </div>
             <div className="p-5">
               <div className="divide-y divide-line">
-                {ECONOMIC.map((e) => (
-                  <div key={e.label} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
-                        <e.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                {ECONOMIC.map((e) => {
+                  const open = ecoRowsOpen.has(e.label);
+                  return (
+                    <div key={e.label} className="py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <button onClick={() => toggleEcoRow(e.label)} aria-expanded={open} className="flex items-center gap-3 text-left min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                            <e.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                          </div>
+                          <span className="body-text truncate">{e.label}</span>
+                          <ChevronDown className={`w-4 h-4 text-[#5B6B78] shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                        </button>
+                        <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatUSD(e.value)}</span>
                       </div>
-                      <span className="body-text truncate">{e.label}</span>
+                      {open && (
+                        <div className="mt-2.5 ml-11 rounded-xl border border-line bg-white p-3.5 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="secondary-text">{e.reasoning}</p>
+                            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-[#5B6B78]">
+                              <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                              We considered {e.docs[0]} and {e.docCount - 1}+ more documents.
+                            </div>
+                          </div>
+                          <button onClick={() => openDrawer(e)} className="shrink-0 text-sm font-semibold text-deep hover:text-ink transition-colors whitespace-nowrap">
+                            View details →
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-sm font-medium text-ink tabular-nums shrink-0">{formatRange(e.value)}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="mt-3 pt-3 border-t-2 border-line flex items-center justify-between">
                 <span className="text-sm font-semibold text-ink">Economic Damages Subtotal</span>
-                <span className="text-lg font-bold text-ink tabular-nums">{formatRange(subtotal)}</span>
+                <span className="text-lg font-bold text-ink tabular-nums">{formatUSD(subtotal)}</span>
               </div>
             </div>
           </div>
@@ -1663,7 +1780,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
                   <div className="eyebrow mb-1">Recommended Multiplier</div>
-                  <div className="text-2xl font-bold text-deep tabular-nums">{model.multiplier}×</div>
+                  <div className="text-2xl font-bold text-deep tabular-nums">{multiplierRange(model.multiplier)}</div>
                 </div>
                 <div className="bg-tint border border-[#D6F2F7] rounded-xl p-4">
                   <div className="eyebrow mb-1">Estimated Non-Economic Damages</div>
@@ -1677,7 +1794,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                   <span className="eyebrow text-deep">Recommended Valuation Strategy</span>
                 </div>
                 <p className="body-text">
-                  LECO recommends applying a <strong className="font-semibold text-ink">{model.multiplier}× multiplier</strong> to estimate{" "}
+                  LECO recommends applying a <strong className="font-semibold text-ink">{multiplierRange(model.multiplier)} multiplier</strong> to estimate{" "}
                   <strong className="font-semibold text-ink">Non-Economic Damages</strong> based on the verified case evidence and overall case strength.
                 </p>
               </div>
@@ -1697,7 +1814,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                       </span>
                     </div>
                     <p className="secondary-text mt-0.5">
-                      Factors contributing to the recommended {model.multiplier}× multiplier.
+                      Factors contributing to the recommended {multiplierRange(model.multiplier)} multiplier.
                     </p>
                   </div>
                   <ChevronDown
@@ -1711,20 +1828,29 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                     {DA_DAMAGE_FACTORS.map((f) => (
                       <div key={f.category} className="px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-semibold text-ink">{f.category}</span>
-                          <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="text-sm font-semibold text-ink">{f.category}</span>
+                            <span className={SEVERITY_PILL[f.severity]}>{f.severity}</span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-semibold text-ink tabular-nums">{SEVERITY_MULTIPLIER[f.severity]}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-[#8A98A3]">Multiplier</div>
+                          </div>
                         </div>
                         <p className="secondary-text mt-1">{f.rationale}</p>
                       </div>
                     ))}
 
-                    {/* AI Multiplier Rationale — why these factors justify 9× */}
-                    <div className="bg-[#F6FDFF] px-4 py-3.5">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <Sparkles className="w-4 h-4 text-deep" strokeWidth={1.75} />
-                        <span className="eyebrow text-deep">AI Multiplier Rationale</span>
+                    {/* Summary — combined factors → recommended multiplier → non-economic estimate */}
+                    <div className="bg-tint px-4 py-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-[#5B6B78]">Recommended Multiplier</span>
+                        <span className="text-sm font-bold text-ink tabular-nums">{multiplierRange(model.multiplier)}</span>
                       </div>
-                      <p className="secondary-text">{DA_MULTIPLIER_RATIONALE}</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-[#5B6B78]">Estimated Non-Economic Damages</span>
+                        <span className="text-sm font-bold text-ink tabular-nums">{formatRange(model.nonEconomicTotal)}</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1746,7 +1872,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
             <div className="min-w-0">
               <div className="eyebrow text-soft mb-1">Total Recommended Value</div>
               <div className="font-mono text-xs text-soft tabular-nums truncate">
-                {formatRange(model.economicTotal)} <span className="text-brand">+</span> {formatRange(model.nonEconomicTotal)}
+                {formatUSD(model.economicTotal)} <span className="text-brand">+</span> {formatRange(model.nonEconomicTotal)}
               </div>
             </div>
             <div className="text-white font-bold tabular-nums shrink-0" style={{ fontSize: "24px", lineHeight: 1.1, letterSpacing: "-0.01em" }}>
@@ -1772,7 +1898,7 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
                 </div>
                 <div className="text-right shrink-0">
                   <div className="eyebrow mb-1.5">Amount</div>
-                  <div className="text-lg font-bold text-ink tabular-nums">{formatRange(d.amount)}</div>
+                  <div className="text-lg font-bold text-ink tabular-nums">{formatUSD(d.amount)}</div>
                 </div>
               </div>
 
@@ -1854,6 +1980,116 @@ export function EconomicDamagesTab({ model, documents, goTo, goToValuation }: Ta
       onPrev={() => setWsIndex((i) => Math.max(0, i - 1))}
       onNext={() => setWsIndex((i) => Math.min(evidenceDocSets.length - 1, i + 1))}
       onClose={() => setWsOpen(false)}
+      onDownload={() => {}}
+    />
+
+    {/* Economic line-item detail drawer — itemized, evidence-backed breakdown */}
+    {drawerItem && (
+      <>
+        <div className="fixed inset-0 bg-ink/40 z-50" onClick={() => setDrawerItem(null)} />
+        <div className="fixed top-0 right-0 h-full w-[380px] max-w-[90vw] bg-white shadow-xl z-50 flex flex-col">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
+            <h2 className="card-title">Document Details</h2>
+            <button onClick={() => setDrawerItem(null)} className="p-1.5 hover:bg-tint rounded-lg transition-colors">
+              <X className="w-5 h-5 text-[#5B6B78]" strokeWidth={1.75} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div>
+              <div className="eyebrow mb-1">Category</div>
+              <div className="text-sm font-semibold text-ink">{drawerItem.category}</div>
+            </div>
+            <div>
+              <div className="eyebrow mb-1">Amount</div>
+              <div className="text-sm font-semibold text-ink tabular-nums">{formatUSD(drawerItem.value)}</div>
+            </div>
+
+            <div className="border-t border-line" />
+
+            <div>
+              <div className="eyebrow mb-2">{drawerItem.docCount} Supporting Documents</div>
+              <div className="space-y-2">
+                {(drawerDocsOpen ? breakdown : breakdown.slice(0, 3)).map((doc, i) => {
+                  const open = expandedDocRows.has(doc.name);
+                  return (
+                    <div key={doc.name} className="rounded-lg border border-line bg-offwhite overflow-hidden">
+                      <button onClick={() => toggleDocRow(doc.name)} className="w-full text-left px-3 py-2.5 hover:bg-wash transition-colors">
+                        <div className="eyebrow text-[#8A98A3] mb-1.5">Document {String(i + 1).padStart(2, "0")}</div>
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                          <span className="text-xs font-medium text-ink truncate flex-1">{doc.name}</span>
+                          <span className="text-xs font-semibold text-ink tabular-nums shrink-0">{formatUSD(doc.amount)}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-deep shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="px-3 pb-3 pt-2.5 border-t border-line bg-white space-y-3">
+                          <div>
+                            <div className="eyebrow flex items-center gap-1.5 mb-1">
+                              <Sparkles className="w-3 h-3 text-deep" strokeWidth={1.75} /> AI Summary
+                            </div>
+                            <p className="text-xs text-[#5B6B78] leading-relaxed">{doc.aiSummary}</p>
+                          </div>
+                          <div>
+                            <div className="eyebrow mb-1">Billing Period</div>
+                            <p className="text-xs font-medium text-ink">{doc.billingPeriod}</p>
+                          </div>
+                          <button
+                            onClick={() => { setEcoWsFocus(doc.name); setEcoWsView("preview"); }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-line text-deep text-xs font-medium hover:bg-tint transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> Preview Document
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {drawerItem.docCount > 3 && (
+                <button onClick={() => setDrawerDocsOpen((o) => !o)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-deep hover:text-ink transition-colors">
+                  {drawerDocsOpen ? "Show less" : `+${drawerItem.docCount - 3} More`}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${drawerDocsOpen ? "rotate-180" : ""}`} strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
+
+            {/* Verified Total — itemized amounts reconcile to the category total */}
+            <div className="border-t border-line pt-4">
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-tint border border-[#D6F2F7] px-3.5 py-3">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-deep shrink-0" strokeWidth={1.75} />
+                  <span className="text-xs font-semibold text-deep">Verified Total</span>
+                </div>
+                <span className="text-sm font-bold text-ink tabular-nums">{formatUSD(verifiedTotal)}</span>
+              </div>
+              <p className="text-[11px] text-[#8A98A3] mt-1.5">Sum of all {drawerItem.docCount} itemized documents · matches the verified {drawerItem.category} total.</p>
+            </div>
+          </div>
+
+          <div className="border-t border-line p-4 flex items-center gap-2">
+            <button onClick={() => { setEcoWsFocus(null); setEcoWsView("preview"); }} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-white border border-line text-ink text-sm font-medium hover:bg-wash transition-colors">
+              <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview
+            </button>
+            <button onClick={() => { setEcoWsFocus(null); setEcoWsView("insights"); }} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand hover:bg-deep text-white text-sm font-semibold transition-colors">
+              <Sparkles className="w-4 h-4" strokeWidth={1.75} /> Insights
+            </button>
+          </div>
+        </div>
+      </>
+    )}
+
+    {/* Preview / Insights workspace for the economic drawer's documents */}
+    <DocumentWorkspaceModal
+      docs={ecoWsView && drawerItem ? orderedDrawerDocs : null}
+      contextPanel={drawerItem ? { summary: [
+        { label: "Category", value: drawerItem.category },
+        { label: "Amount", value: formatUSD(drawerItem.value) },
+        { label: "Supporting Documents", value: String(drawerItem.docCount) },
+      ] } : undefined}
+      initialView={ecoWsView ?? "preview"}
+      onClose={() => { setEcoWsView(null); setEcoWsFocus(null); }}
       onDownload={() => {}}
     />
     </>
@@ -2561,42 +2797,290 @@ export function EvidenceRepositoryTab({ documents }: TabProps) {
   );
 }
 
-// ── Tab 7 — Demand Package ────────────────────────────────────────────────────
+// ── Tab 7 — Intelligence ──────────────────────────────────────────────────────
+// Litigation intelligence dashboard: coverage & deadline posture, the settlement
+// corridor, an AI valuation brief, comparable verdicts, a negligence audit, and
+// attorney trial-prep directives — all built from the existing case model.
 
-const DEMAND_SECTIONS = [
-  { title: "Demand Letter", desc: "Attorney-ready narrative letter asserting liability and demand.", icon: FileSignature },
-  { title: "Medical Chronology", desc: "Complete treatment timeline from incident through present.", icon: HeartPulse },
-  { title: "Damages Summary", desc: "Economic and non-economic damages with supporting figures.", icon: DollarSign },
-  { title: "Liability Summary", desc: "Negligence findings and the basis for defendant fault.", icon: Scale },
-  { title: "Evidence Index", desc: "Indexed map of every exhibit referenced in the demand.", icon: FileText },
-  { title: "Supporting Exhibits", desc: "Compiled records, reports, and imaging as labeled exhibits.", icon: ClipboardList },
+const POLICY_LIMIT = 2_000_000;
+
+// AI-generated strategy brief — each dimension of the case in one line.
+const VALUATION_BRIEF: { label: string; icon: any; text: string }[] = [
+  { label: "Overall Case Strength", icon: ShieldCheck, text: "Strong. Objective liability evidence and verified, permanent injuries leave the defense little room to contest fault or damages." },
+  { label: "Recovery Potential", icon: DollarSign, text: "High. The recommended value sits within confirmed policy limits, making a full-corridor recovery realistic." },
+  { label: "Key Advantages", icon: CheckCircle, text: "Officer fault determination, a corroborated red-light violation, and two-level cervical herniations documented on MRI." },
+  { label: "Primary Litigation Strategy", icon: Gavel, text: "Anchor a policy-limit demand on objective liability, holding firm on economic damages while treating the multiplier as the negotiable lever." },
 ];
 
-export function DemandPackageTab({ model }: TabProps) {
+// Local comparable jury verdicts / settlements matched to this case profile.
+const COMPARABLE_VERDICTS: { caseName: string; amount: number; summary: string; matchScore: number; tags: string[] }[] = [
+  {
+    caseName: "Reyes v. Interstate Freight Lines",
+    amount: 1_750_000,
+    summary: "Commercial truck entered a controlled intersection against the signal; plaintiff sustained multi-level cervical herniations requiring ongoing care.",
+    matchScore: 94,
+    tags: ["Red-light violation", "Cervical injury", "Commercial carrier", "Cook County"],
+  },
+  {
+    caseName: "Donovan v. Metro Cartage Co.",
+    amount: 1_420_000,
+    summary: "Failure-to-yield collision with a delivery vehicle; disputed liability resolved on the responding officer's fault determination.",
+    matchScore: 89,
+    tags: ["Failure to yield", "Officer fault", "Disputed liability"],
+  },
+  {
+    caseName: "Whitfield v. Prairie Logistics",
+    amount: 1_180_000,
+    summary: "Intersection crash producing permanent impairment; carrier policy limits framed the settlement corridor.",
+    matchScore: 85,
+    tags: ["Permanent impairment", "Policy-limit demand", "MVA"],
+  },
+];
+
+// Attorney action checklist generated from case intelligence.
+const TRIAL_DIRECTIVES: { title: string; icon: any; items: string[] }[] = [
+  { title: "Recommended Depositions", icon: MessageSquare, items: ["Defendant commercial driver", "Responding officer (fault determination)", "Corroborating eyewitness", "Carrier corporate representative"] },
+  { title: "Expert Witnesses", icon: User, items: ["Accident reconstructionist", "Treating neurosurgeon", "Life-care planner", "Vocational economist"] },
+  { title: "Discovery Priorities", icon: Search, items: ["Driver qualification & hours-of-service logs", "Telematics / ELD and dashcam data", "Carrier maintenance & training records", "Intersection signal-timing records"] },
+  { title: "Trial Preparation", icon: ClipboardList, items: ["Prepare demonstrative reconstruction exhibits", "Draft motions in limine on comparative fault", "Assemble the medical-chronology exhibit binder", "Develop jury themes on commercial-carrier negligence"] },
+];
+
+export function DemandPackageTab({ model, goTo }: TabProps) {
+  const consumption = Math.round((model.recommendedSettlement / POLICY_LIMIT) * 100);
+  const dashboard = [
+    { icon: ShieldCheck, label: "Policy Coverage", value: formatUSD(POLICY_LIMIT), sub: "Commercial auto liability limit" },
+    { icon: DollarSign, label: "Verified Economic Damages", value: formatUSD(model.economicTotal), sub: "Documented & reconciled" },
+    { icon: SlidersHorizontal, label: "Coverage Consumption", value: `${consumption}%`, sub: "of available policy limit", bar: consumption },
+    { icon: Calendar, label: "Filing Deadline", value: "Feb 14, 2028", sub: "Statute of limitations · ≈19 mo left" },
+  ];
+
+  // Settlement corridor scenarios — floor, recommended target, policy ceiling.
+  const corridor = [
+    { label: "Conservative", amount: model.estimatedLow },
+    { label: "Recommended", amount: model.recommendedSettlement, highlight: true },
+    { label: "Policy Ceiling", amount: POLICY_LIMIT },
+  ];
+  const corridorMax = Math.max(...corridor.map((c) => c.amount));
+
+  const audit = VIOLATION_CARDS.slice(0, 4);
+
   return (
-    <div className="max-w-4xl space-y-8">
-      <div className="lg-card p-6 flex items-center justify-between gap-6">
-        <div>
-          <h2 className="section-header mb-1">Demand Package</h2>
-          <p className="secondary-text max-w-xl">An assembled, attorney-ready package for {model.caseName}. Review each component, then export the complete demand.</p>
+    <div className="space-y-8">
+      {/* ── Top: full-width dashboard header + AI Active badge ── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="section-header">Litigation Strategy Dashboard</h2>
+          <p className="secondary-text mt-1 max-w-2xl">A strategic read on {model.caseName} — coverage posture, settlement corridor, comparable outcomes, and the directives to take it to trial.</p>
         </div>
-        <button className="btn btn-primary gap-2 shrink-0"><Download className="w-4 h-4" strokeWidth={1.75} /> Export PDF</button>
+        <span className="pill pill-complete shrink-0">
+          <span className="relative flex w-1.5 h-1.5">
+            <span className="absolute inline-flex w-full h-full rounded-full bg-green-500 opacity-75 animate-ping" />
+            <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-green-500" />
+          </span>
+          AI Active
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {DEMAND_SECTIONS.map((s) => (
-          <div key={s.title} className="lg-card lg-card-i p-5 flex flex-col">
-            <div className="flex items-start justify-between mb-3">
-              <div className="w-10 h-10 rounded-lg bg-tint flex items-center justify-center"><s.icon className="w-4 h-4 text-deep" strokeWidth={1.75} /></div>
-              <span className="pill pill-complete"><CheckCircle className="w-3.5 h-3.5" strokeWidth={1.75} /> Ready</span>
+      {/* 1 — Four equal-width summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {dashboard.map((c) => (
+          <div key={c.label} className="lg-card p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                <c.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+              </div>
+              <span className="eyebrow">{c.label}</span>
             </div>
-            <h3 className="card-title mb-1">{s.title}</h3>
-            <p className="secondary-text leading-relaxed flex-1">{s.desc}</p>
-            <button className="mt-4 pt-3 border-t border-line flex items-center gap-1 text-xs font-medium text-deep hover:text-ink transition-colors self-start">
-              Preview <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-            </button>
+            <div className="kpi-value">{c.value}</div>
+            {typeof c.bar === "number" && (
+              <div className="mt-2.5 h-1.5 rounded-full bg-[#EEF3F6] overflow-hidden">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, c.bar)}%` }} />
+              </div>
+            )}
+            <p className="secondary-text mt-2">{c.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* 2 — Strategic Settlement Corridor */}
+      <div className="lg-card overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-5 items-stretch">
+          <div className="lg:col-span-3 p-6">
+            <div className="eyebrow text-deep mb-2">Settlement Strategy</div>
+            <h2 className="section-header mb-2">Strategic Settlement Corridor</h2>
+            <p className="body-text leading-relaxed max-w-md">
+              Model the negotiation range from a conservative floor through the recommended target up to the confirmed policy ceiling. Run the simulation to pressure-test each anchor against comparable outcomes.
+            </p>
+            <button onClick={() => goTo?.("negotiation")} className="btn btn-primary gap-2 mt-6">
+              <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} /> Execute Corridor Simulation
+            </button>
+          </div>
+
+          {/* Visualization — scenario bar chart */}
+          <div className="lg:col-span-2 bg-tint border-t lg:border-t-0 lg:border-l border-[#D6F2F7] p-6">
+            <div className="eyebrow mb-4">Projected Corridor</div>
+            <div className="flex items-end justify-between gap-4 h-40">
+              {corridor.map((c) => (
+                <div key={c.label} className="flex-1 flex flex-col items-center justify-end h-full">
+                  <div className="text-xs font-semibold text-ink tabular-nums mb-2">{formatCompact(c.amount)}</div>
+                  <div
+                    className={`w-full rounded-t-lg ${c.highlight ? "bg-brand" : "bg-[#CDE9F1]"}`}
+                    style={{ height: `${(c.amount / corridorMax) * 100}%` }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-4 mt-2 pt-2 border-t border-[#D6F2F7]">
+              {corridor.map((c) => (
+                <div key={c.label} className="flex-1 text-center eyebrow truncate">{c.label}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Two-column intelligence section (65 / 35) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-20 gap-6 items-start">
+
+        {/* LEFT (≈65%) — Strategy Brief → Negligence Audit → Trial Preparation */}
+        <div className="lg:col-span-13 space-y-8">
+
+          {/* 3 — Strategic Litigation Valuation Brief */}
+          <div className="lg-card p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+              <div className="lg:col-span-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-[18px] h-[18px] text-deep" strokeWidth={1.75} />
+                  <h2 className="section-header">Strategic Litigation Valuation Brief</h2>
+                </div>
+                <p className="body-text leading-relaxed mb-5">
+                  LECO assesses {model.caseName} as a high-recovery matter. Objective liability, verified permanent injuries, and a favorable jurisdiction support a policy-limit posture with strong settlement leverage.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {VALUATION_BRIEF.map((b) => (
+                    <div key={b.label} className="rounded-xl border border-line bg-offwhite p-4">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <b.icon className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                        <span className="eyebrow">{b.label}</span>
+                      </div>
+                      <p className="secondary-text leading-relaxed">{b.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="lg:col-span-1 flex flex-col items-center justify-center rounded-xl bg-tint border border-[#D6F2F7] p-6">
+                <ConfidenceRing value={model.confidence} />
+                <div className="mt-4 text-center">
+                  <div className="eyebrow mb-1">Recommended Value</div>
+                  <div className="text-2xl font-bold text-ink tabular-nums">{formatCompact(model.recommendedSettlement)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 — Case Negligence & Clinical Lapse Audit */}
+          <div>
+            <div className="mb-4">
+              <h2 className="section-header">Case Negligence & Clinical Lapse Audit</h2>
+              <p className="secondary-text mt-1 max-w-2xl">The strongest negligence findings LECO surfaced, with the AI reasoning and evidence confidence behind each.</p>
+            </div>
+            <div className="space-y-4">
+              {audit.map((v) => (
+                <div key={v.id} className="lg-card p-5">
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span className={VIOLATION_SEVERITY_PILL[v.severity]}>{v.severity}</span>
+                      <h3 className="card-title">{v.title}</h3>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-deep tabular-nums">{v.confidence}%</div>
+                      <div className="eyebrow">Confidence</div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-tint border border-[#D6F2F7] p-3.5">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                      <span className="eyebrow text-deep">AI Reasoning</span>
+                    </div>
+                    <p className="secondary-text leading-relaxed">{v.aiSummary}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-3 text-xs text-[#5B6B78]">
+                    <ShieldCheck className="w-3.5 h-3.5 text-deep shrink-0" strokeWidth={1.75} />
+                    Evidence strength: <span className="font-semibold text-ink">{v.evidenceStrength}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 5 — Litigation & Trial Preparation Directives */}
+          <div>
+            <div className="mb-4">
+              <h2 className="section-header">Litigation & Trial Preparation Directives</h2>
+              <p className="secondary-text mt-1 max-w-2xl">An attorney action checklist generated from the case intelligence above.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {TRIAL_DIRECTIVES.map((d) => (
+                <div key={d.title} className="lg-card p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                      <d.icon className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                    </div>
+                    <h3 className="card-title">{d.title}</h3>
+                  </div>
+                  <ul className="space-y-2.5">
+                    {d.items.map((item) => (
+                      <li key={item} className="flex items-start gap-2.5">
+                        <CheckCircle className="w-4 h-4 text-deep mt-0.5 shrink-0" strokeWidth={1.75} />
+                        <span className="body-text leading-snug">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT (≈35%) — Local Comparable Jury Verdicts (sticky) */}
+        <div className="lg:col-span-7 lg:sticky lg:top-[176px] self-start">
+          <div className="mb-4">
+            <h2 className="section-header">Local Comparable Jury Verdicts</h2>
+            <p className="secondary-text mt-1">Verdicts and settlements from the same jurisdiction and fact pattern, ranked by match.</p>
+          </div>
+          <div className="space-y-4">
+            {COMPARABLE_VERDICTS.map((v) => (
+              <div key={v.caseName} className="lg-card lg-card-i p-5 flex flex-col">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-tint flex items-center justify-center shrink-0">
+                    <Gavel className="w-4 h-4 text-deep" strokeWidth={1.75} />
+                  </div>
+                  <span className="pill pill-complete">{v.matchScore}% Match Index</span>
+                </div>
+                <h3 className="card-title leading-snug mb-1">{v.caseName}</h3>
+                <div className="text-xl font-bold text-ink tabular-nums mb-2">{formatUSD(v.amount)}</div>
+                <p className="secondary-text leading-relaxed flex-1">{v.summary}</p>
+                <div className="flex flex-wrap gap-1.5 mt-4 pt-4 border-t border-line">
+                  {v.tags.map((t) => (
+                    <span key={t} className="pill pill-neutral">{t}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 7 — Final CTA */}
+      <div className="bg-ink rounded-xl px-6 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="section-header text-white">Ready to assemble the demand</h2>
+          <p className="text-soft text-sm mt-1 max-w-xl">Compile the intelligence above into an attorney-ready demand package to advance the case.</p>
+        </div>
+        <button onClick={() => goTo?.("negotiation")} className="btn btn-primary gap-2 shrink-0">
+          <FileSignature className="w-4 h-4" strokeWidth={1.75} /> Generate Demand
+        </button>
       </div>
     </div>
   );

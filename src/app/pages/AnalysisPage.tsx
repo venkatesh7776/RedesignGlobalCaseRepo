@@ -153,6 +153,9 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
   // Per-set AI Insights passed to the Document Workspace (so the preview's
   // Insights panel matches the card's inline AI summary).
   const [insightsSets, setInsightsSets] = useState<(any | undefined)[]>([]);
+  // Per-set Document Context Panel data (so the preview rail shows the card's
+  // title + key info — mirrors the Negligence Analysis cards).
+  const [panelSets, setPanelSets] = useState<(any | undefined)[]>([]);
 
   // Derive everything from shared documents
   const categories = classifyDocuments(documents);
@@ -194,12 +197,14 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
     index = 0,
     view: "preview" | "insights" | "chat" = "preview",
     insights?: (any | undefined)[],
+    panels?: (any | undefined)[],
   ) => {
     setDocSets(sets);
     setSetContexts(contexts);
     setSetIndex(index);
     setWorkspaceView(view);
     setInsightsSets(insights ?? []);
+    setPanelSets(panels ?? []);
     setShowDocumentPreview(true);
   };
 
@@ -216,9 +221,47 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
     confidence: { level: s.confidence >= 85 ? "High" : "Medium", score: s.confidence },
   });
 
-  // Opened directly from a drawer's supporting evidence (single document).
-  const openChatForFile = (file: string) => openSets([[docForFile(file)]], [{ contextType: "Document", reference: file }], 0, "chat");
-  const openPreviewForFile = (file: string) => openSets([[docForFile(file)]], [{ contextType: "Document", reference: file }], 0, "preview");
+  // Document Context Panel data for the preview rail — surfaces the signal's
+  // title + key info (mirrors the Negligence Analysis cards).
+  const signalPanel = (s: AnalysisFinding) => ({
+    summary: [
+      { label: s.kind === "liability" ? "Liability Signal" : "Injury Signal", value: s.title },
+      { label: "Category", value: s.tag },
+      { label: "Confidence", value: `${s.confidence}%` },
+      { label: "Supporting Documents", value: String(s.evidence.length) },
+    ],
+  });
+
+  // Document Context Panel + AI Insights for a timeline event, so the workspace
+  // opened from the timeline drawer surfaces the event's title + key info.
+  const timelinePanel = (ev: TimelineEvent) => ({
+    summary: [
+      { label: "Event", value: ev.cardTitle },
+      { label: "Date", value: ev.date },
+      { label: "Supporting Documents", value: String(ev.evidence.length) },
+    ],
+  });
+  const timelineInsight = (ev: TimelineEvent) => ({
+    summary: ev.summary,
+    keyPoints: [ev.liabilityImpact, ev.injuryImpact].filter(Boolean) as string[],
+    entities: [
+      { label: "Event", value: ev.cardTitle },
+      { label: "Date", value: ev.date },
+    ],
+    supportingDocs: ev.evidence,
+    confidence: { level: "High", score: 96 },
+  });
+  // Preview evidence from the timeline drawer — carries the event context so the
+  // preview rail shows the card's title + info. `focus` selects the active tab.
+  const openTimelineEvidence = (ev: TimelineEvent, view: "preview" | "insights" | "chat" = "preview", focus?: string) => {
+    if (ev.evidence.length === 0) return;
+    const ordered = focus ? [focus, ...ev.evidence.filter((f) => f !== focus)] : ev.evidence;
+    openSets(
+      [ordered.map(docForFile)],
+      [{ contextType: "Timeline Event", reference: ev.cardTitle }],
+      0, view, [timelineInsight(ev)], [timelinePanel(ev)],
+    );
+  };
 
   // Analysis Complete panel → smooth-scroll navigation into the matching section
   const scrollToId = (id: string) =>
@@ -495,7 +538,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                               onClick={() => openSets(
                                 visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
                                 visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
-                                i, "preview", visible.map(signalInsight),
+                                i, "preview", visible.map(signalInsight), visible.map(signalPanel),
                               )}
                               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-ink rounded-lg text-sm font-medium hover:bg-wash transition-colors"
                             >
@@ -505,7 +548,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                               onClick={() => openSets(
                                 visible.map((s) => s.evidence.map((e: any) => docForFile(e.file))),
                                 visible.map((s) => ({ contextType: s.kind === "liability" ? "Liability Signal" : "Injury Signal", reference: s.title })),
-                                i, "insights", visible.map(signalInsight),
+                                i, "insights", visible.map(signalInsight), visible.map(signalPanel),
                               )}
                               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-line text-deep rounded-lg text-sm font-medium hover:bg-tint transition-colors"
                             >
@@ -675,7 +718,7 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                           </div>
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => openPreviewForFile(file)}
+                              onClick={() => openTimelineEvidence(ev, "preview", file)}
                               className="flex items-center gap-1.5 text-xs font-medium text-deep hover:text-ink px-2.5 py-1.5 rounded-lg hover:bg-tint transition-colors"
                             >
                               <Eye className="w-3.5 h-3.5" strokeWidth={1.75} /> Preview
@@ -715,14 +758,14 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
                 {/* Actions */}
                 <div className="flex items-center gap-3 pt-5 border-t border-line">
                   <Button
-                    onClick={() => openPreviewForFile(ev.evidence[0] ?? "")}
+                    onClick={() => openTimelineEvidence(ev, "preview")}
                     disabled={ev.evidence.length === 0}
                     className="btn btn-primary gap-2 flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Eye className="w-4 h-4" strokeWidth={1.75} /> Preview All Evidence
                   </Button>
                   <Button
-                    onClick={() => openChatForFile(ev.evidence[0] ?? "")}
+                    onClick={() => openTimelineEvidence(ev, "chat")}
                     disabled={ev.evidence.length === 0}
                     className="btn btn-secondary gap-2 flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -758,12 +801,13 @@ export function AnalysisPage({ caseData, documents = [], onStageClick, onBackToI
         docs={showDocumentPreview ? activeSet : null}
         noteContext={activeContext}
         insights={insightsSets[setIndex]}
+        contextPanel={panelSets[setIndex]}
         initialView={workspaceView}
         position={setIndex + 1}
         total={docSets.length}
         onPrev={() => setSetIndex((i) => Math.max(0, i - 1))}
         onNext={() => setSetIndex((i) => Math.min(docSets.length - 1, i + 1))}
-        onClose={() => { setShowDocumentPreview(false); setDocSets([]); setSetContexts([]); setSetIndex(0); }}
+        onClose={() => { setShowDocumentPreview(false); setDocSets([]); setSetContexts([]); setSetIndex(0); setPanelSets([]); }}
         onDownload={() => {}}
       />
     </div>
